@@ -159,6 +159,10 @@
         # is declared. An unrecognised class, an unusable value, or unreadable evidence all
         # resolve to the STRICTER depth, never the looser one.
         verification:
+          # `off` is load-bearing: the suite pins that a project declaring NOTHING keeps the
+          # behaviour it had before. Turning enforcement on globally breaks that guarantee and
+          # silently escalates every review that omits a class — tried, reverted. The speedup
+          # comes from callers DECLARING a class, not from this default.
           policy: off # off | advisory | enforced
           confirmation: on-override # never | on-override | always
           report: true # print the resolved class and depth in workflow_status
