@@ -1,0 +1,5 @@
+{
+  "name": "dsh-workflow-panel",
+  "description": "工作流设置面板：在插件详情页与对话侧边栏直接调整档位、开关、审批强度等参数，无需编辑配置文件。",
+  "type": "module"
+}

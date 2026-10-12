@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Logs and crash reports
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+
+# Per-project workflow state. MUST NOT be committed: it is machine-owned,
+# project-specific, and regenerated on opt-in.
+.dsh/
+
+# Coverage and test output
+coverage/
+.nyc_output/
+*.lcov
+
+# Editor and IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# Operating system
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# Packaging output
+*.tgz
