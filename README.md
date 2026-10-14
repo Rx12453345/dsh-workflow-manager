@@ -124,6 +124,7 @@ Each document has exactly one job.
 
 | Document | Job |
 |---|---|
+| [docs/GETTING-STARTED.zh-CN.md](docs/GETTING-STARTED.zh-CN.md) | **中文入门指南.** For someone who does not configure software: two sentences to remember, what to say for each kind of project, and what to do when it feels slow. |
 | [docs/USAGE.md](docs/USAGE.md) | **For users.** The four-step start, the three surfaces, the nine phases, the FAQ. |
 | [docs/DESIGN.md](docs/DESIGN.md) | **Why it is built this way.** Design decisions and the first-party sources behind them. |
 | [docs/PITFALLS.md](docs/PITFALLS.md) | **What went wrong.** Every hard-won trap, with the root cause and the fix. |
