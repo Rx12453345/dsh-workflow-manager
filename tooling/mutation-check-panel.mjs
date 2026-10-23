@@ -10,9 +10,10 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
 
-const ROOT = 'D:/DSH/P5/src-12453345_-dsh-workflow'
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const CLIENT = `${ROOT}/lib/client.js`
 const SCHEMA = `${ROOT}/lib/config-schema.js`
 const only = new Set(process.argv.slice(2))

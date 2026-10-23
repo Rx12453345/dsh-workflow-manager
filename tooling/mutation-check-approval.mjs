@@ -9,9 +9,13 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
 
-const ROOT = 'D:/DSH/P5/src-12453345_-dsh-workflow'
+// REPO-RELATIVE, NOT THE OLD P5 PATH. The harness was written in one development checkout and
+// hardcoded it; running it from any other clone then executed tests in a directory that had no
+// `test/` at all and reported the baseline as red. `..` from `tooling/` is the repository root.
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 
 /** Every harness takes this lock, so no two of them can rewrite lib/ at the same time. */
 const LABEL = 'tooling/mutation-check-approval.mjs'
@@ -195,21 +199,23 @@ const MUTANTS = [
     id: 'M13',
     what: 'resolveApprovalState passes the project file through with its problems dropped',
     file: 'lib/approval-state.js',
-    find: `  const { config, sources, gate } = readApprovalForProject(rowConfig, file, defaults)`,
-    replace: `  const { config, sources, gate } = readApprovalForProject(rowConfig, { ...file, problems: [] }, defaults)`,
+    find: `  const { config, sources, gate } = readApprovalForProject(rowConfig, file, defaults, projectDir)`,
+    replace: `  const { config, sources, gate } = readApprovalForProject(rowConfig, { ...file, problems: [] }, defaults, projectDir)`,
     suite: 'unit',
     expect: /unreadable project file|fully read/,
   },
   {
     id: 'M14',
-    what: 'the project-file cache keys on the path only, so an edit is invisible',
+    what: 'the monotonic memory is bypassed, so a direct edit weakens the running gate',
     file: 'lib/approval-state.js',
-    find: `  const hit = cache.get(path)
-  if (hit && hit.key === stamp) return hit`,
-    replace: `  const hit = cache.get(path)
-  if (hit) return hit`,
+    find: `    if (previous !== undefined && previous !== null) {
+      effective = mergeMonotonicGate(previous, effective)
+    }`,
+    replace: `    if (false && previous !== undefined) {
+      effective = mergeMonotonicGate(previous, effective)
+    }`,
     suite: 'unit',
-    expect: /stale|re-reads/,
+    expect: /weaker file value must be ignored|direct file edit/,
   },
   {
     id: 'M15',
@@ -286,6 +292,9 @@ const MUTANTS = [
     rowConfig,
     projectFile,
     DEFAULT_CONFIG.approval,
+    // The monotonic memory is keyed by the project whose file this is. Status must report the
+    // gate that will judge the next call, not the weaker value the file was just edited to.
+    project.projectDir ?? workspace.dir,
   )`,
     replace: `  const { config, sources } = resolveEffectiveConfig(rowConfig, projectFile.value)
   const approvalGate = readApprovalGate(config.approval, DEFAULT_CONFIG.approval)`,
@@ -471,12 +480,12 @@ const MUTANTS = [
   },
   {
     id: 'M37',
-    what: 'the auto-denial message stops naming the cause and the remedy',
+    what: 'the auto-denial message stops naming the cause and the human remedy',
     file: 'lib/approval.js',
-    find: "    '— so the request is denied AUTOMATICALLY. That is NOT a human declining it, nothing was executed, ' +\n    `and retrying the same call cannot help. Remedy: ${APPROVAL_REMEDY}; alternatively exempt this one tool ` +\n    'with workflow_set path=approval.exemptTools. Do not relax approval.denyHighAlways to work around this.'",
+    find: "    '— so the request is denied AUTOMATICALLY. That is NOT a human declining it, nothing was executed, ' +\n    'and retrying the same call cannot help. ' +\n    `What to do instead: ${APPROVAL_REMEDY}. Changing approval.exemptTools or approval.denyHighAlways ` +\n    'from inside this session is the same self-authorization and is refused for the same reason.'",
     replace: "    '— so the request is denied. Nothing was executed.'",
     suite: 'unit',
-    expect: /human decline|remedy/,
+    expect: /human decline|remedy|settings page/,
   },
   {
     id: 'M38',
@@ -700,6 +709,61 @@ const MUTANTS = [
     replace: `  if (false) return null // 1b.`,
     suite: 'unit',
     expect: /cwd|session|unreadable/,
+  },
+  {
+    id: 'M62',
+    what: 'a deleted opt-in file switches the gate off mid-session',
+    file: 'lib/approval-state.js',
+    find: `  const optedIn = file.present === true || gate.optedInMissing === true`,
+    replace: `  const optedIn = file.present === true`,
+    suite: 'unit',
+    expect: /deleting the file must not switch the gate off|OPT-IN FILE MISSING/,
+  },
+  {
+    id: 'M63',
+    what: 'a user-confirmed weakening write does not reset the monotonic snapshot, so it never takes effect',
+    file: 'lib/tools.js',
+    find: `  if (weakening.length > 0 && written.written === true) {
+    forgetApprovalSnapshot(workspace.dir)
+  }`,
+    replace: `  if (false) {
+    forgetApprovalSnapshot(workspace.dir)
+  }`,
+    suite: 'unit',
+    expect: /after\.gate\.strength|confirmed write|llm-only/,
+  },
+  {
+    id: 'M64',
+    what: 'workflow_set applies a weakening write without asking the user',
+    file: 'lib/tools.js',
+    find: `  if (weakening.length > 0) {`,
+    replace: `  if (false && weakening.length > 0) {`,
+    suite: 'unit',
+    expect: /confirmation-required|user confirmation/,
+  },
+  {
+    id: 'M65',
+    what: 'workflow_set on a gate setting is classified low again, so the gate never sees it',
+    file: 'lib/approval.js',
+    find: `  if (name === 'workflow_set' && isGateConfigurationWrite(args)) {`,
+    replace: `  if (false) {`,
+    suite: 'unit',
+    expect: /classified above low|classified medium|gate setting/,
+  },
+  {
+    id: 'M66',
+    what: 'the refusal text recommends the self-downgrade command again',
+    file: 'lib/approval.js',
+    find: `export const APPROVAL_REMEDY =
+  'run the work from the root conversation, or ask the user to change approval.strength in the ' +
+  'settings page or in .dsh/workflow.yml (the change takes effect only on a restart). A session ' +
+  'must not change the gate that is judging it; this plugin will refuse a weakening write from ' +
+  'inside the session'`,
+    replace: `export const APPROVAL_REMEDY =
+  'workflow_set path=approval.strength value=llm-only keeps model-judged gating without needing a ' +
+  'prompt, and value=off disables the gate'`,
+    suite: 'unit',
+    expect: /value=llm-only|downgrade command/,
   },
 ]
 

@@ -10,9 +10,12 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
 
-const ROOT = 'D:/DSH/P5/src-12453345_-dsh-workflow'
+// Repo-relative; see the comment in mutation-check-approval.mjs. The old P5 path made the
+// baseline run in a checkout with no `test/` whenever the harness was run from a clone.
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const only = new Set(process.argv.slice(2))
 
 /** Every harness takes this lock, so no two of them can rewrite lib/ at the same time. */

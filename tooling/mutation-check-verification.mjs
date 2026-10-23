@@ -122,8 +122,16 @@ const MUTANTS = [
     id: 'V09',
     file: CFG,
     defect: 'a MALFORMED verification section falls back to the documented defaults instead of the strict ones',
-    from: "    return { policy: 'enforced', confirmation: 'always', report: true, usable: false, problems }",
-    to: "    return { policy: 'off', confirmation: 'on-override', report: true, usable: false, problems }",
+    from: `    return {
+      policy: 'enforced',
+      confirmation: 'always',
+      report: true,
+      usable: false,`,
+    to: `    return {
+      policy: 'off',
+      confirmation: 'on-override',
+      report: true,
+      usable: false,`,
     must: ['a malformed verification SECTION resolves to the strictest usable settings'],
   },
   {
