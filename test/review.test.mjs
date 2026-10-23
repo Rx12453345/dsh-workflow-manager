@@ -1415,6 +1415,12 @@ test('a project can declare its source roots, security files, and UI surfaces', 
   assert.equal(unknown.class, 'security')
   assert.deepEqual(unknown.unknown, ['other/tool.js'])
 
+  // A `..` segment must not earn a source-root match: `lib/../secret.js` is outside `lib`, and
+  // treating it as ordinary logic would be a classification bypass. It is rejected evidence.
+  const escape = declared('lib/../secret.js')
+  assert.equal(escape.class, null)
+  assert.ok(escape.rejected.includes('lib/../secret.js'))
+
   const allowed = classifyChange({
     changedFiles: ['other/tool.js'],
     classification: { ...classification, allowUnknownSources: true },
