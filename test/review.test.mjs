@@ -1393,6 +1393,120 @@ test('an unclassified source file is treated as stricter than security', () => {
   assert.equal(isSecurityPath('lib/gatekeeper.js'), false)
 })
 
+test('a project can declare its source roots, security files, and UI surfaces', () => {
+  // THE EXTERNAL-PROJECT FIX. Before this, every `.js` outside the plugin's own list was an
+  // unclassified security surface, so `class: logic` was refused on an ordinary test file.
+  const classification = {
+    sources: ['dsh-bilibili-pro'],
+    security: ['dsh-bilibili-pro/lib/approval.js'],
+    ui: ['dsh-bilibili-pro/render'],
+    allowUnknownSources: false,
+    inferUiFromExtensions: true,
+  }
+  const declared = source =>
+    classifyChange({ changedFiles: [source], classification, selfProject: false })
+
+  assert.equal(declared('dsh-bilibili-pro/tests/unit/baseline.test.mjs').class, 'logic')
+  assert.equal(declared('dsh-bilibili-pro/lib/approval.js').class, 'security')
+  assert.equal(declared('dsh-bilibili-pro/render/panel.html').uiTouched, true)
+  assert.equal(declared('dsh-bilibili-pro/render/panel.html').class, 'logic')
+
+  const unknown = declared('other/tool.js')
+  assert.equal(unknown.class, 'security')
+  assert.deepEqual(unknown.unknown, ['other/tool.js'])
+
+  const allowed = classifyChange({
+    changedFiles: ['other/tool.js'],
+    classification: { ...classification, allowUnknownSources: true },
+    selfProject: false,
+  })
+  assert.equal(allowed.class, 'logic', 'the explicit opt-in turns an unknown source into logic')
+  assert.match(allowed.reasons.join(' '), /allowUnknownSources is true/)
+
+  // Extension inference can be switched off for a project whose `.html` is not rendered by
+  // this plugin; an explicitly listed UI surface still counts.
+  const noInference = classifyChange({
+    changedFiles: ['dsh-bilibili-pro/other.html'],
+    classification: { ...classification, ui: [], inferUiFromExtensions: false },
+    selfProject: false,
+  })
+  assert.equal(noInference.uiTouched, false)
+  assert.equal(noInference.class, 'logic', 'the file is under a declared source root')
+})
+
+test('the built-in lists describe this plugin, not every project', () => {
+  // `lib/tools.js` is ordinary logic in the plugin's own repository, but an external project's
+  // file with that path is NOT entitled to the built-in classification: it misses the list and
+  // stays fail-closed unless the project declares it.
+  assert.equal(classifyChange({ changedFiles: ['lib/tools.js'], selfProject: true }).class, 'logic')
+  assert.equal(classifyChange({ changedFiles: ['lib/tools.js'], selfProject: false }).class, 'security')
+  assert.equal(classifyChange({ changedFiles: ['lib/client.js'], selfProject: true }).uiTouched, true)
+  assert.equal(classifyChange({ changedFiles: ['lib/client.js'], selfProject: false }).class, 'security')
+})
+
+test('a classification with an unusable entry is ignored as a whole, not half-applied', () => {
+  const policy = readVerificationPolicy({
+    policy: 'advisory',
+    sources: ['lib'],
+    security: ['../outside'],
+  })
+  assert.equal(policy.classificationUsable, false)
+  assert.ok(policy.classificationProblems.some(problem => problem.includes('project-relative')))
+
+  // The resolver receives the unusable flag and must NOT use the remaining `sources` list: a
+  // half-applied classification could drop the security entry and grade the file logic.
+  const resolution = resolveVerificationDepth({
+    declaredClass: 'logic',
+    changedFiles: ['lib/ordinary.js'],
+    policy: 'advisory',
+    classification: policy.classification,
+    classificationUsable: policy.classificationUsable,
+    classificationProblems: policy.classificationProblems,
+    selfProject: false,
+  })
+  assert.equal(resolution.derived, 'security')
+  assert.equal(resolution.classification, null)
+
+  const good = readVerificationPolicy({
+    policy: 'advisory',
+    sources: ['lib', 'tests/**'],
+    allowUnknownSources: true,
+  })
+  assert.equal(good.classificationUsable, true)
+  assert.deepEqual(good.classification.sources, ['lib', 'tests/**'])
+  assert.equal(good.classification.allowUnknownSources, true)
+})
+
+test('the audit says "contradicted", not "CLASS REFUSED", under advisory', () => {
+  const classification = {
+    sources: ['dsh-bilibili-pro'],
+    security: [],
+    ui: [],
+    allowUnknownSources: false,
+    inferUiFromExtensions: true,
+  }
+  const options = {
+    declaredClass: 'docs',
+    changedFiles: ['dsh-bilibili-pro/tests/unit/baseline.test.mjs'],
+    classification,
+    classificationUsable: true,
+    selfProject: false,
+  }
+  const advisory = resolveVerificationDepth({ ...options, policy: 'advisory' })
+  const advisoryText = renderVerificationAudit(
+    buildVerificationAudit(advisory, { policy: 'advisory' }),
+  ).join('\n')
+  assert.match(advisoryText, /DECLARATION CONTRADICTED/)
+  assert.doesNotMatch(advisoryText, /CLASS REFUSED/)
+  assert.match(advisoryText, /project classification: sources=\[dsh-bilibili-pro\]/)
+
+  const enforced = resolveVerificationDepth({ ...options, policy: 'enforced' })
+  const enforcedText = renderVerificationAudit(
+    buildVerificationAudit(enforced, { policy: 'enforced' }),
+  ).join('\n')
+  assert.match(enforcedText, /CLASS REFUSED/)
+})
+
 test('harness selection follows the depth, not a hardcoded list', () => {
   const depth0 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.UNIT, files: ['lib/tools.js'] })
   assert.deepEqual(depth0.required, [], 'depth 0 implies no mutation harness')
@@ -1815,7 +1929,11 @@ test('the workflow_review tool refuses a ui change with no human check', async (
   // Rendering is not testable from here, so the attestation is the only evidence there is. It is
   // still only the caller's word — which is why the audit says `caller-attestation` — but a MISSING
   // word must stop the review rather than be recorded as an absent field and passed anyway.
-  const dir = makeVerificationProject(enforcedProject)
+  //
+  // The project declares `lib/client.js` as a UI surface. It is a temporary project, not the
+  // installed plugin's own package, so the built-in UI list is (correctly) not applied to it;
+  // an external project has to say which of its files renders.
+  const dir = makeVerificationProject('verification:\n  policy: enforced\n  ui:\n    - lib/client.js\n')
   try {
     const { calls, service } = passingSubagents()
     const def = buildReviewToolDefinition({ config: resolveConfig({}) })

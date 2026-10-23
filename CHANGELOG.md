@@ -20,6 +20,41 @@ live until it has been synced and DSH has been restarted. Every entry below says
 Implemented, tested offline, and **not in the installed copy** at the end of the journal. Until each is
 synced and DSH restarted, the running plugin does not have it.
 
+### Fixed — the A1–A5 bug-fix batch
+
+- **A1 — `workflow_status` and `workflow_review` disagreed about delegation.** Status probed `ctx.get`
+    then the property; review read `exec.subagents`, the registration-time property, and the OUTER
+    context, so a service reachable only through `get` was invisible to review. Both now use one
+    `resolveSubagents()` at call time; `lib/index.js` passes a live getter; status prints a separate
+    `review route:` line. A get-only regression test asserts the reviewer actually starts.
+- **A2 — the approval gate could be lowered by the session it judges.** The refusal text named
+    `workflow_set path=approval.strength value=llm-only/off`; `workflow_set` was classified `low`; the
+    write needed no confirmation and took effect on the next call. That is a self-authorization, and it
+    is now closed in four layers: a human-only remedy text; a tool-level refusal of weakening writes
+    (root can apply one only after a real `userQuestions` confirmation, a child cannot); the pre-execute
+    gate classifies gate-setting writes as `medium`; and the process keeps the strongest gate it has
+    seen per project, so a direct file edit or a deleted opt-in file cannot lower or switch it off until
+    a restart. `workflow_status` reports `DOWNGRADE IGNORED` / `OPT-IN FILE MISSING`. The decision to
+    make it strict was the user's: the agent cannot change the gate on its own.
+- **A3 — the test runner was blocked by the DSH sandbox.** `npm test` now runs `run-unit-tests.mjs`,
+    which detects the sandbox's piped-child `EPERM` and sets `DSH_WORKFLOW_SANDBOX=1`; the six
+    environment-dependent tests (five mutation-lock races and the Chromium layout measurement) skip with
+    a visible reason, so the suite is 508 tests / 501 pass / 7 skip / 0 fail in the sandbox. A normal
+    terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
+- **A4 — the change classifier treated an external project's `.js` as a security surface.** The
+    built-in lists describe this plugin's own repository, so every unknown external source failed
+    closed. A project can now declare `verification.sources` / `security` / `ui` and explicitly set
+    `allowUnknownSources: true`; the built-in lists apply only to the installed plugin's own package;
+    an invalid classification is ignored as a whole, not half-applied. Under `advisory`, a contradicted
+    declaration now says `DECLARATION CONTRADICTED` instead of printing `CLASS REFUSED` for a refusal
+    that did not happen; `enforced` still refuses.
+- **A5 — a review that did not run was recorded as a FAIL.** `workflow_review` stored every
+    `runReview` outcome; `unavailable`/`misconfigured`/`exhausted`/`incomplete` then became
+    `passes:false`, `attempts+1`, a `blocked_reason`, and an evidence row with null
+    round/overall/fingerprint. Only `status === 'reviewed'` is stored now, and `record-review` refuses
+    a non-verdict even if one arrives another way. A "review did not run" is no longer evidence for
+    either outcome.
+
 ### Added
 
 - **Risk-graded verification depth** (`verification.policy`). A change can be declared

@@ -115,14 +115,19 @@ Tool calls are intercepted according to risk. Four strengths:
 | `llm-only` | the model decides alone |
 | `off` | no interception (**a provable `high` is still refused by the monotonic guard**) |
 
-> ⚠️ **In an environment with approval prompts disabled, use `llm-only` or `off`.** With `ask-user`,
-> every shell call is auto-rejected, and the message reads `the user rejected tool …` — **indistinguishable
-> from a human refusal**.
+> ⚠️ **A session must not change the gate that is judging it.** With `ask-user` in an environment whose
+> approval prompts are disabled, every shell call is auto-rejected, and the host's message reads
+> `the user rejected tool …` — **indistinguishable from a human refusal**. That is an environment fact
+> about this session, not permission for the model to widen the gate.
 >
-> ```powershell
-> # run inside DSH, not in a shell:
-> workflow_set path=approval.strength value=llm-only
-> ```
+> The way out is a **human** action: run the gated work from the **root conversation**, or ask the user
+> to change `approval.strength` in the settings page or in `.dsh/workflow.yml` (a restart applies it).
+> A delegated child cannot answer the question, so it refuses the write and reports the change upward.
+>
+> Why the old advice was removed: `workflow_set path=approval.strength value=llm-only` was a
+> self-authorization. A child that had just been denied could run it, then perform the write the gate
+> had refused. The tool now refuses a weakening write unless a real user confirms it, and the runtime
+> keeps the stronger gate for the rest of the session even if the file is edited directly.
 
 ### ④ The constraint ledger
 
@@ -163,6 +168,31 @@ Then four change classes map to four depths:
 - **A declaration can only add cost, never remove it.** `class=docs` while touching `lib/approval.js` is
   **refused by name**, and the strictest depth is used instead.
 - **The security class is not degradable** at any setting.
+
+**A project that is not this plugin's own repository must declare its surfaces.** The built-in file
+lists describe the plugin's own `lib/`, so an external project's ordinary `.js` is otherwise an
+unclassified source and stays fail-closed (security). Add a section to the project's
+`.dsh/workflow.yml`:
+
+```yaml
+verification:
+  policy: advisory
+  sources:          # project-relative files or trees; '*' and '**' are allowed
+    - lib
+    - index.js
+    - tests
+  security:         # wins over sources
+    - lib/auth.js
+  ui:               # explicit rendered surfaces
+    - web
+  allowUnknownSources: false   # explicit opt-in; default false keeps unknown sources security
+  inferUiFromExtensions: true  # false stops `.html` etc. from counting as UI by extension
+```
+
+Only the installed plugin's own package gets the built-in lists. A typo or an absolute/`..` path in
+the classification invalidates the WHOLE classification rather than dropping just the bad entry; the
+fail-closed default is used and the status says so. Under `advisory`, a contradicted declaration is
+reported as `DECLARATION CONTRADICTED`; only `enforced` refuses.
 
 Once enabled, **documentation and UI changes stop going through the full review loop** — which is the
 efficiency it buys.

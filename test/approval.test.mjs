@@ -56,7 +56,7 @@ import {
 import { resolveApprovalState, clearApprovalStateCache } from '../lib/approval-state.js'
 import { applyCore } from '../lib/index.js'
 import { DEFAULT_CONFIG, resolveConfig, configWarnings } from '../lib/config.js'
-import { renderStatus, buildStatus, validateSettingValue, runSet } from '../lib/tools.js'
+import { renderStatus, buildStatus, validateSettingValue, runSet, buildSetToolDefinition } from '../lib/tools.js'
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
 
@@ -1111,6 +1111,11 @@ test('workflow_status reports a broken approval section instead of describing a 
 })
 
 test('workflow_status prints the official warning verbatim for the strengths that need it', () => {
+  // These cases share `process.cwd()` as their project, and the gate now remembers the
+  // strongest value it has seen per project for the life of the process. Clear between cases
+  // so each one starts from the configuration it is testing (a restart is the production
+  // equivalent).
+  clearApprovalStateCache()
   const status = (approval, approvalStats, approvalReview) =>
     buildStatus({
       exec: makeExec({ cwd: process.cwd() }),
@@ -1124,6 +1129,7 @@ test('workflow_status prints the official warning verbatim for the strengths tha
   const quiet = renderStatus(status({ strength: 'ask-user' }))
   assert.ok(!quiet.includes('approval warning:'))
 
+  clearApprovalStateCache()
   const loud = renderStatus(status({ strength: 'llm-only' }, () => ({ reviewerCalls: 3, reviewerFailures: 1 }), { hasLlm: () => true }))
   for (const line of OFFICIAL_AUTO_REVIEW_WARNING.english) {
     assert.ok(loud.includes(`approval warning: ${line}`), `missing verbatim warning:\n${line}`)
@@ -1132,6 +1138,7 @@ test('workflow_status prints the official warning verbatim for the strengths tha
 
   // A configured-but-unrunnable reviewer must be visible: the strength promises the model
   // decides, while every gated call would in fact fail closed.
+  clearApprovalStateCache()
   const blocked = renderStatus(status({ strength: 'llm-then-user' }, undefined, { hasLlm: () => false }))
   assert.match(blocked, /approval reviewer: NOT runnable/)
   assert.match(blocked, /llm` service is absent/)
@@ -1562,9 +1569,13 @@ test('a prompt that cannot be answered is refused with the cause and the remedy,
     `the risk level must not be restated in the detail: ${decision.reason}`,
   )
   assert.match(decision.reason, /needs a human decision \(medium\): "pwsh" is a shell\/exec transport/)
-  // THE REMEDY, always. A refusal nobody can act on is the failure being fixed.
-  assert.match(decision.reason, /approval\.strength value=llm-only/)
-  assert.match(decision.reason, /value=off/)
+  // THE WAY OUT, always — but a HUMAN one. The refusal used to name
+  // `workflow_set path=approval.strength value=llm-only/off`, which is a self-authorization:
+  // the child that could not answer the prompt could still widen the gate and retry. The
+  // assertion is now the opposite direction on purpose.
+  assert.match(decision.reason, /settings page|\.dsh\/workflow\.yml/)
+  assert.match(decision.reason, /root conversation/)
+  assert.doesNotMatch(decision.reason, /value=llm-only|value=off/, 'the refusal must not hand the model the downgrade command')
   assert.ok(decision.reason.includes(APPROVAL_REMEDY), 'the remedy comes from the one shared string')
   assert.match(decision.reason, /pwsh/, 'the refusal names the tool it refused')
   // The structured identity is unchanged, so a caller keying on the code still works.
@@ -1787,6 +1798,7 @@ test('an unanswerable prompt does not weaken the gate: the high-risk guard is un
 })
 
 test('workflow_status DETECTS an unsatisfiable strength instead of printing a healthy approval line', () => {
+  clearApprovalStateCache()
   const approval = fakeApproval('never')
   const status = buildStatus({
     exec: makeExec({ cwd: process.cwd() }),
@@ -1800,14 +1812,15 @@ test('workflow_status DETECTS an unsatisfiable strength instead of printing a he
   assert.equal(status.effectiveConfig.approval.promptChannel.policy, 'never')
   const text = renderStatus(status)
   assert.match(text, /APPROVAL NOT SATISFIABLE HERE/)
-  assert.match(text, /approval\.strength value=llm-only/)
-  assert.match(text, /value=off/)
+  assert.match(text, /settings page|\.dsh\/workflow\.yml/)
+  assert.doesNotMatch(text, /value=llm-only|value=off/, 'the status must not advertise the downgrade command')
   assert.ok(text.includes(APPROVAL_REMEDY))
   assert.match(text, /as if a human had rejected it/)
   assert.doesNotThrow(() => JSON.stringify(status))
 })
 
 test('workflow_status states the conditional risk when the environment cannot be read', () => {
+  clearApprovalStateCache()
   // `workflow_status` runs with whatever context it was given, and in a deployment where the
   // `approval` service cannot be reached the honest answer is an explicit IF — a conditional
   // warning that is true beats a detection that is invented.
@@ -1834,6 +1847,7 @@ test('workflow_status states the conditional risk when the environment cannot be
 })
 
 test('workflow_status stays quiet about prompts for the strengths that do not need one', () => {
+  clearApprovalStateCache()
   for (const strength of ['llm-only', 'off']) {
     const status = buildStatus({
       exec: makeExec({ cwd: process.cwd() }),
@@ -2370,5 +2384,215 @@ test('apply() wires the exemption end to end: a real deployment is allowed and l
   } finally {
     rmSync(dir, { recursive: true, force: true })
     rmSync(profile, { recursive: true, force: true })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// A2: the gate cannot be weakened by the session it judges
+// ---------------------------------------------------------------------------
+
+test('workflow_set on a gate setting is classified above low', () => {
+  // The exact call from the incident. It used to be `low` because every dsh-workflow tool
+  // was short-circuited as "project-local", so the pre-execute gate never saw the write.
+  for (const args of [
+    { path: 'approval.strength', value: 'llm-only' },
+    { path: 'approval', value: { strength: 'off' } },
+    { path: 'approval.denyHighAlways', value: false },
+    { path: 'evaluator.independent', value: false },
+    { path: 'verification.policy', value: 'off' },
+  ]) {
+    const verdict = classifyRisk(makeExec({ name: 'workflow_set', arguments: args }), { exemptTools: [] })
+    assert.equal(verdict.risk, 'medium', `${JSON.stringify(args)} was classified ${verdict.risk}`)
+    assert.match(verdict.reason, /decides whether calls run/)
+  }
+
+  // A READ is not a write and stays cheap: no prompt for looking.
+  const read = classifyRisk(makeExec({ name: 'workflow_set', arguments: { path: 'approval.strength' } }), {
+    exemptTools: [],
+  })
+  assert.equal(read.risk, 'low')
+})
+
+test('a weakening approval write is NOT applied without a user confirmation', () => {
+  clearApprovalStateCache()
+  const dir = makeProject('tier: standard\n')
+  try {
+    const result = runSet({
+      exec: makeExec({ cwd: dir }),
+      config: {},
+      path: 'approval.strength',
+      value: 'llm-only',
+      hasValue: true,
+    })
+    assert.equal(result.ok, false)
+    assert.equal(result.status, 'confirmation-required')
+    assert.match(result.reason, /user confirms/i)
+    assert.deepEqual(result.weakening, ['approval.strength ask-user -> llm-only'])
+    assert.doesNotMatch(
+      readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'),
+      /llm-only/,
+      'the file must be untouched while confirmation is pending',
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
+})
+
+test('the workflow_set tool asks the user, writes only on an exact approval, and refuses a delegated child', async () => {
+  clearApprovalStateCache()
+  const dir = makeProject('tier: standard\n')
+
+  /** Answer the one question with the given label. */
+  const answerWith = label => ({
+    async ask({ questions }) {
+      const question = questions[0]
+      return { answers: [{ id: question.id, selected: [label], custom: null }] }
+    },
+  })
+
+  const define = userQuestions =>
+    buildSetToolDefinition({
+      config: resolveConfig({}),
+      ctx: null,
+      services: null,
+      getUserQuestions: () => userQuestions,
+    })
+
+  try {
+    const exec = makeExec({ cwd: dir })
+    const refused = await define({
+      async ask({ questions }) {
+        return {
+          answers: [{ id: questions[0].id, selected: ['Keep the current gate'], custom: null }],
+        }
+      },
+    }).execute({ path: 'approval.strength', value: 'llm-only' }, exec)
+    assert.equal(refused.ok, false)
+    assert.equal(refused.status, 'not-confirmed')
+    assert.doesNotMatch(readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'), /llm-only/)
+
+    const approved = await define(answerWith('Apply this approval-gate change')).execute(
+      { path: 'approval.strength', value: 'llm-only' },
+      exec,
+    )
+    assert.equal(approved.ok, true, JSON.stringify(approved).slice(0, 300))
+    assert.equal(approved.changed, true)
+    assert.match(readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'), /strength: llm-only/)
+    // The confirmed write is the ONLY way the monotonic memory is lowered: the next read must
+    // see the value the user just approved.
+    const after = resolveApprovalState(exec, {}, { defaults: DEFAULTS })
+    assert.equal(after.gate.strength, 'llm-only')
+
+    // A delegated child cannot answer userQuestions; the tool must refuse, not write.
+    const child = await define({
+      async ask() {
+        throw Object.assign(new Error('delegated'), { code: 'DELEGATED_CALLER' })
+      },
+    }).execute({ path: 'approval.strength', value: 'off' }, makeExec({ cwd: dir }))
+    assert.equal(child.ok, false)
+    assert.equal(child.status, 'confirmation-failed')
+    assert.match(child.reason, /delegated child/i)
+    assert.doesNotMatch(readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'), /strength: off/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
+})
+
+test('the gate denies workflow_set on approval.strength in a session that cannot answer', async () => {
+  // THE INCIDENT, AT THE LAYER THAT ACTUALLY REFUSES IT. Even before `runSet` is reached,
+  // the pre-execute listener sees a gate-configuration write as medium and, in a session whose
+  // policy is `never`, denies it. The refusal must not name the downgrade command.
+  clearApprovalStateCache()
+  const gate = createApprovalGate({
+    resolveGate: staticResolver(gateOf({ strength: 'ask-user' })),
+    getApproval: () => fakeApproval('never'),
+  })
+  const exec = makeExec({
+    name: 'workflow_set',
+    arguments: { path: 'approval.strength', value: 'llm-only' },
+  })
+  const spy = nextSpy()
+  const decision = await gate.listener(exec, spy.next)
+  assert.equal(decision.kind, 'deny')
+  assert.equal(spy.calls.count, 0, 'the tool must not run')
+  assert.match(decision.reason, /AUTOMATICALLY/)
+  assert.match(decision.reason, /root conversation/)
+  assert.doesNotMatch(decision.reason, /value=llm-only|value=off/)
+})
+
+test('status shows a downgrade as ignored and a deleted opt-in as still active', () => {
+  clearApprovalStateCache()
+  const dir = makeProject('approval:\n  strength: ask-user\n')
+  const file = join(dir, '.dsh', 'workflow.yml')
+  const exec = makeExec({ cwd: dir })
+  try {
+    // Establish the session baseline.
+    resolveApprovalState(exec, {}, { defaults: DEFAULTS })
+    writeFileSync(file, 'approval:\n  strength: llm-only\n', 'utf8')
+
+    const status = buildStatus({
+      exec,
+      config: {},
+      services: { get: () => undefined },
+      workspaceDir: dir,
+    })
+    assert.equal(status.effectiveConfig.approval.strength, 'ask-user')
+    assert.equal(status.effectiveConfig.approval.monotonic.downgradeIgnored, true)
+    const text = renderStatus(status)
+    assert.match(text, /DOWNGRADE IGNORED/)
+    assert.match(text, /IGNORED until a restart|ignored until a restart/i)
+
+    rmSync(file)
+    const missing = buildStatus({
+      exec,
+      config: {},
+      services: { get: () => undefined },
+      workspaceDir: dir,
+    })
+    assert.equal(missing.effectiveConfig.approval.monotonic.optedInMissing, true)
+    assert.match(renderStatus(missing), /OPT-IN FILE MISSING/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
+})
+
+test('a direct file edit cannot weaken the running gate, and deleting the file cannot switch it off', () => {
+  clearApprovalStateCache()
+  const dir = makeProject('approval:\n  strength: ask-user\n')
+  const file = join(dir, '.dsh', 'workflow.yml')
+  try {
+    const exec = makeExec({ cwd: dir })
+    assert.equal(resolveApprovalState(exec, {}, { defaults: DEFAULTS }).gate.strength, 'ask-user')
+
+    // A file tool (not workflow_set) writes the weaker gate straight to disk.
+    writeFileSync(file, 'approval:\n  strength: llm-only\n', 'utf8')
+    const edited = resolveApprovalState(exec, {}, { defaults: DEFAULTS })
+    assert.equal(edited.gate.strength, 'ask-user', 'the weaker file value must be ignored in-session')
+    assert.equal(edited.gate.downgradeIgnored, true)
+    assert.ok(edited.gate.notices.some(notice => /IGNORED/.test(notice)))
+
+    // A restart is the documented way to adopt it.
+    clearApprovalStateCache()
+    assert.equal(resolveApprovalState(exec, {}, { defaults: DEFAULTS }).gate.strength, 'llm-only')
+
+    // Re-establish a baseline, then delete the opt-in file. The gate must stay active.
+    writeFileSync(file, 'approval:\n  strength: ask-user\n', 'utf8')
+    clearApprovalStateCache()
+    assert.equal(resolveApprovalState(exec, {}, { defaults: DEFAULTS }).gate.strength, 'ask-user')
+    rmSync(file)
+    const missing = resolveApprovalState(exec, {}, { defaults: DEFAULTS })
+    assert.equal(missing.active, true, 'deleting the file must not switch the gate off mid-session')
+    assert.equal(missing.gate.strength, 'ask-user')
+    assert.equal(missing.gate.optedInMissing, true)
+
+    // After a restart the deleted file means what it says: not opted in.
+    clearApprovalStateCache()
+    assert.equal(resolveApprovalState(exec, {}, { defaults: DEFAULTS }).active, false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
   }
 })

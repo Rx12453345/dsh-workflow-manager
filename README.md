@@ -27,8 +27,9 @@ Long-running agent work fails in ways that extra prompting does not fix:
 - **Review fingerprinting** — the reviewed files are hashed. Editing them after the review invalidates the approval.
 - **Context isolation** — the review round-trip runs inside a delegated child and returns only a summary, so it does not consume the main conversation.
 - **Risk-graded approval gate** — `low` passes, `medium` is handled according to the configured strength, `high` is always denied through a monotonic guard that no later listener can flip back to `allow`.
+- **The gate is not writable by the session it judges** — a weakening `approval`/`verification` write needs a real user confirmation; a delegated child cannot ask one and refuses. The process keeps the strongest gate it has seen per project, so a direct file edit (or deleting the opt-in file) cannot lower or switch it off until a restart.
 - **Constraint ledger with retirement** — constraints are recorded with a `retire_when` condition. The GC only ever suggests; it never auto-retires. A natural-language retirement signal is reported as *needs a human*, never as *satisfied*.
-- **Risk-based verification depth** — optionally, a change class (`docs` / `ui` / `logic` / `security`) declares how deep verification must go, and the framework checks the declaration against the files actually changed.
+- **Risk-based verification depth** — optionally, a change class (`docs` / `ui` / `logic` / `security`) declares how deep verification must go, and the framework checks the declaration against the files actually changed. A project can declare its own `verification.sources` / `security` / `ui` surfaces, so an external project's ordinary `.js` is not mistaken for a security surface; an unrecognised source stays fail-closed unless the project explicitly sets `allowUnknownSources: true`.
 
 ## Install
 
@@ -111,8 +112,8 @@ Architecture, the full design rationale and every first-party source behind thes
 
 Honesty about what is proven matters more here than polish, because this project has a documented history of documents claiming things that were not true.
 
-- **Unit suite: 493 tests, 492 pass, 0 fail, 1 skipped** — verified by running `node run-unit-tests.mjs` in this repository. The single skip is a Windows-only limitation (the platform has no catchable `SIGTERM`), not a failing case.
-- **Mutation testing** is the layer that shows the tests have teeth: seven `mutation-check-*.mjs` harnesses inject defects and require the suite to go red, then restore sources byte-for-byte. They must never be run concurrently — a shared lock refuses the second.
+- **Unit suite: 508 tests; in the DSH Windows sandbox 501 pass, 7 skip, 0 fail** — verified with `npm test` (`node run-unit-tests.mjs`). Six of the skips are environment-gated: the sandbox denies a piped child (`EPERM`) and cannot start the Chromium layout browser. The runner detects that and the affected tests skip LOUDLY with a reason; a normal terminal does not set the flag, so those six run there. The seventh skip is the pre-existing Windows-only `SIGTERM` limitation.
+- **Mutation testing** is the layer that shows the tests have teeth: seven `mutation-check-*.mjs` harnesses inject defects and require the suite to go red, then restore sources byte-for-byte. They must never be run concurrently — a shared lock refuses the second. They spawn a captured child, so in the DSH sandbox they need a normal terminal or the harness's own sandbox mode.
 - **`verification.policy` defaults to `off`.** The feature does nothing until it is enabled; the report is informational only. Do not read the class/depth table as active behaviour.
 - **Deployment cannot be completed by an agent on its own.** `sync-to-profile.mjs` is still refused as an opaque script, and the self-deployment exemption — which covers file tools carrying explicit paths — cannot authorise its own **first** deployment, because the copy that is running predates the exemption. A first deployment needs an out-of-band copy performed by a human, or by a session the gate does not govern.
 
@@ -140,7 +141,8 @@ Each document has exactly one job.
 ```powershell
 cd D:\DSH\P5\src-12453345_-dsh-workflow
 
-node run-unit-tests.mjs                    # the full unit suite
+npm test                                   # the full unit suite; auto-detects the DSH sandbox
+npm run test:sandbox                       # force sandbox mode (environment tests skip with a reason)
 node run-smoke-test.mjs                    # full apply/execute/render chain on a fake ctx
 node run-config-check.mjs                  # patch values vs code defaults
 node tooling/validate-tool-definition.mjs  # run the SHIPPED registry validator on our six definitions

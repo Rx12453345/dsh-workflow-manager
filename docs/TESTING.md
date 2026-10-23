@@ -89,18 +89,21 @@ use the out-of-band `sync-to-profile.mjs` above.
 deployment path**, rather than forcing a choice between "move the configuration window" and "out-of-band
 manual copy" — the latter leaves **no audit record at all**.
 
-### 0.4 One thing this environment requires first
+### 0.4 When this environment cannot answer the approval prompt
 
-Approval prompts are **disabled** here, and the approval gate classifies shell as **medium**, so
-`approval.strength: ask-user` makes **every shell call auto-rejected** (the message reads
-`the user rejected tool "pwsh"`, indistinguishable from a human refusal).
+Approval prompts may be **disabled** in a session, and the approval gate classifies shell as **medium**,
+so `approval.strength: ask-user` makes **every shell call auto-rejected** (the message reads
+`the user rejected tool "pwsh"`, indistinguishable from a human refusal). That is a property of the
+session, not a reason for the model to widen its own gate.
 
-```powershell
-# run inside DSH, not in a shell:
-workflow_set path=approval.strength value=llm-only
-```
+The correct response is to run the gated work in the **root conversation**, or to ask the user to change
+`approval.strength` in the settings page / `.dsh/workflow.yml` (restart applies it). A delegated child
+cannot ask, so it must return the request upward. `workflow_set` refuses a weakening write without a
+real user confirmation, and a direct file edit cannot lower the gate for the rest of the session.
 
-Without this step, **a session in this environment cannot run any test**.
+**The old instruction — `workflow_set path=approval.strength value=llm-only` — was removed because it
+was a self-authorization: the child hit the gate, changed the setting, and retried the write.** The
+refusal's own text used to recommend it; that text is now a human-only remedy.
 
 ### 0.5 `llm-only` judgements are non-deterministic
 
@@ -108,10 +111,15 @@ Without this step, **a session in this environment cannot run any test**.
 was measured: two agents ran the **same** `sync-to-profile.mjs`, one allowed and one refused, while the
 same copy command had already succeeded for another agent earlier.
 
-**So: when refused, change the command according to the remedy the refusal names — do not retry until it
-passes.** Retrying is not "routing around", but it is **exploiting non-determinism**, and the official
+**So: do not retry until it passes.** Retrying is **exploiting non-determinism**, and the official
 warning already says it may allow unsafe operations and deny useful work. **"It passed last time" is not
 authorisation.**
+
+When a refusal names a remedy, first ask **who is allowed to perform it**. A remedy that widens the
+gate — changing `approval.strength`, `denyHighAlways`, `exemptTools`, or `evaluator.independent` — is a
+**human** action. A session that performs it has authorised itself; the plugin now refuses that write
+(and keeps the stronger gate even if the file is edited directly). A remedy that is ordinary project
+work can be followed; a remedy that changes the safety control cannot.
 
 ---
 

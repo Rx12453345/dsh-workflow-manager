@@ -43,7 +43,8 @@ Layer 4 does not substitute for layer 1, and layer 1 cannot substitute for layer
 ### 1. The offline suite
 
 ```powershell
-node run-unit-tests.mjs                      # expect: 0 fail (1 platform skip on Windows is normal)
+npm test                                     # expect: 0 fail; 7 skips in the DSH sandbox (6 environment + 1 platform)
+npm run test:sandbox                         # force the sandbox profile; the six environment tests skip with a reason
 node run-smoke-test.mjs                      # expect: "smoke test passed"
 node run-config-check.mjs                    # expect: two OK lines, and "resolved maxDepth is 2"
 node tooling/validate-tool-definition.mjs    # expect: "all 6 tool definitions are acceptable to the shipped registry"
@@ -81,6 +82,10 @@ node tooling/mutation-check-verification.mjs  # the verification-depth policy
 
 Each one injects a defect, runs the suite, records whether it went red, then **restores the source byte
 for byte**.
+
+> **In the DSH Windows sandbox these harnesses cannot spawn their captured child (EPERM).** Run them in
+> a normal terminal, or use the harness's own sandbox mode where it has one. The unit suite is not a
+> substitute for a security-depth harness; a security change with no harness result is not finished.
 
 > **NEVER RUN TWO OF THESE CONCURRENTLY.**
 >

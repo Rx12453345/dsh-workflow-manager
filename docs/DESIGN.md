@@ -484,6 +484,16 @@ medium | high (default medium), deny_high_always: true, reviewer: current-model}
 recommended. `llm-only` and `off` are off by default and require a second confirmation to enable; the
 official warning text is displayed in the settings page when they are selected.
 
+**The gate is not writable by the session it judges.** A denial is not permission to lower the gate.
+`workflow_set` refuses a weakening approval/verification write unless a real user confirms it through the
+host's question service, and a delegated child cannot ask one, so the child refuses and reports upward.
+The pre-execute classifier also treats a gate-setting write as `medium`, so the gate participates even
+before the tool runs. Finally, the process remembers the strongest gate it has seen per project: a direct
+edit of `.dsh/workflow.yml` (or deleting it) cannot lower or switch off the gate for the rest of the
+session. A weaker value takes effect on a restart, or after a user-confirmed write — the two moments at
+which it is the user's decision rather than the session's. `workflow_status` reports the difference as
+`DOWNGRADE IGNORED` / `OPT-IN FILE MISSING` instead of describing a gate that is not running.
+
 The three-level risk model reuses the official definitions directly:
 
 | Level | Meaning | Behaviour |

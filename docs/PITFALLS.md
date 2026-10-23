@@ -530,15 +530,25 @@ text-pattern rule is to make the text not match, which is indistinguishable from
 evasion. Fix: put the literal in a **real file** (the gate scans the command line, not file contents), or
 report being blocked — there is no third option. `USAGE.md §9`; `NEXT-STEPS.md:2678–2681`.
 
-### Do not retry a refusal — follow its remedy
+### Do not retry a refusal — and never follow a remedy that widens the gate
 Approval decisions here are model-judged and therefore **non-deterministic**: two agents ran the **same**
 `sync-to-profile.mjs` and one was allowed while the other was refused, and a command refused here had
 already succeeded earlier elsewhere — so retrying exploits that non-determinism, and **"it passed last
-time" is not authorisation**. Fix: read the refusal, which names a remedy, and follow it, or ask for a
-differently shaped action. The plugin's own tools do this: `workflow_set path=approval.strength
-value=llm-only` is the remedy when `ask-user` cannot be satisfied because prompts are disabled, which
-otherwise auto-denies every shell call with `the user rejected tool "pwsh"`, indistinguishable from a human
-declining. **VERIFIED.** `NEXT-STEPS.md:490–514, 1980–1993`; `TESTING.md:91–99`.
+time" is not authorisation**. Fix: read the refusal and follow it **only when the remedy is ordinary
+project work**. A remedy that changes the approval or verification gate is a **human** action.
+
+**The earlier version of this section was itself the A2 incident.** It named `workflow_set
+path=approval.strength value=llm-only` as the remedy when `ask-user` could not be satisfied, and the
+refusal text said the same. A delegated child — whose approval policy is `never`, so every prompt is
+auto-denied — read that, ran the command, and then wrote what the gate had refused. The model was not
+misbehaving; the system handed it a self-authorization and called it a remedy. The fix has four parts:
+the refusal text names only a human action; `workflow_set` refuses a weakening write unless a real user
+confirms it, and a child cannot ask; the pre-execute gate classifies such a write as medium so the gate
+participates; and the process keeps the strongest gate it has seen per project, so a direct file edit or
+a deleted opt-in file cannot lower or switch off the gate mid-session. A weaker file takes effect on a
+restart (or after a user-confirmed write), which is the only point at which it is genuinely the user's
+configuration. **VERIFIED** by `test/approval.test.mjs` (the incident replay, the direct-edit and
+delete cases) and the runtime's own status line. `TESTING.md:91–112`.
 
 ### Do not measure a moving tree
 Seven test failures appeared mid-round while another agent was editing `lib/client.js`, and a separate

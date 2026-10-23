@@ -772,9 +772,9 @@ try {
       String(decision.reason).slice(0, 240),
     )
     check(
-      'the refusal names the remedy',
-      /approval\.strength value=llm-only/.test(String(decision.reason)) &&
-        /value=off/.test(String(decision.reason)),
+      'the refusal names the HUMAN remedy, never the self-downgrade command',
+      /root conversation|settings page|\.dsh\/workflow\.yml/.test(String(decision.reason)) &&
+        !/value=llm-only|value=off/.test(String(decision.reason)),
       String(decision.reason).slice(0, 240),
     )
 
