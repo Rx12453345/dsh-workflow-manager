@@ -100,8 +100,8 @@ const MUTANTS = [
     id: 'V07',
     file: CFG,
     defect: 'the EVIDENCE half of the floor is dropped, so an undeclared security change resolves shallow',
-    from: '  const floor = Math.max(declaredFloor ?? 0, derivedFloor ?? 0)',
-    to: '  const floor = declaredFloor ?? derivedFloor ?? 0',
+    from: '  const floor = Math.max(declaredFloor ?? 0, derivedFloor ?? 0, requestedDepth ?? 0)',
+    to: '  const floor = declaredFloor ?? derivedFloor ?? requestedDepth ?? 0',
     must: ['the security class is NOT degradable, at any policy setting or explicit depth'],
     note:
       'V03 removes the REFUSAL; this removes the FLOOR. They are separate mutations because a ' +

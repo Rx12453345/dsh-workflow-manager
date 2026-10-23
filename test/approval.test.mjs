@@ -1001,6 +1001,24 @@ test('a workflow_set target project selects the gate, not the session cwd', () =
   }
 })
 
+test('the approval memory treats a case-varied Windows path as one project', () => {
+  if (process.platform !== 'win32') return
+  clearApprovalStateCache()
+  const dir = makeProject('tier: standard\napproval:\n  strength: ask-user\n')
+  try {
+    const first = makeExec({ cwd: dir })
+    assert.equal(resolveApprovalState(first, {}, { defaults: DEFAULTS }).gate.strength, 'ask-user')
+    // A direct edit through the same directory spelled with different case must still be
+    // judged by the memory seeded above, not by a second key.
+    writeFileSync(join(dir, '.dsh', 'workflow.yml'), 'tier: standard\napproval:\n  strength: llm-only\n', 'utf8')
+    const second = makeExec({ cwd: dir.toLowerCase() })
+    assert.equal(resolveApprovalState(second, {}, { defaults: DEFAULTS }).gate.strength, 'ask-user')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
+})
+
 test('the project file selects the strength, and the row config is the base layer', () => {
   clearApprovalStateCache()
   const dir = makeProject('approval:\n  strength: llm-only\n  withhold: 1\n')
@@ -2588,6 +2606,42 @@ test('a confirmation for one verification axis does not clear the approval memor
     // The verification write happened, but the approval axis must still be the gate the
     // session stored, not the value written directly to the file.
     assert.equal(resolveApprovalState(exec, {}, { defaults: DEFAULTS }).gate.strength, 'ask-user')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
+})
+
+test('the safety-gate question names the requested value and the maxRounds delta', async () => {
+  const dir = makeProject('tier: standard\n')
+  try {
+    const seen = []
+    const tool = buildSetToolDefinition({
+      config: resolveConfig({}),
+      getUserQuestions: () => ({
+        async ask({ questions }) {
+          seen.push(questions[0].question)
+          return {
+            answers: [
+              {
+                id: questions[0].id,
+                selected: ['Keep the current gate'],
+                custom: null,
+              },
+            ],
+          }
+        },
+      }),
+    })
+    const result = await tool.execute(
+      { path: 'evaluator.maxRounds', value: 1 },
+      makeExec({ cwd: dir }),
+    )
+    assert.equal(result.ok, false)
+    assert.equal(result.status, 'not-confirmed')
+    assert.equal(seen.length, 1)
+    assert.match(seen[0], /requested value: 1/)
+    assert.match(seen[0], /evaluator\.maxRounds 2 -> 1/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
     clearApprovalStateCache()

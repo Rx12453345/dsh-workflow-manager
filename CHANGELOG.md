@@ -56,7 +56,7 @@ synced and DSH restarted, the running plugin does not have it.
 - **A3 — the test runner was blocked by the DSH sandbox.** `npm test` now runs `run-unit-tests.mjs`,
     which detects the sandbox's piped-child `EPERM` and sets `DSH_WORKFLOW_SANDBOX=1`; the six
     environment-dependent tests (five mutation-lock races and the Chromium layout measurement) skip with
-    a visible reason, so the suite is 513 tests / 506 pass / 7 skip / 0 fail in the sandbox. A normal
+    a visible reason, so the suite is 517 tests / 510 pass / 7 skip / 0 fail in the sandbox. A normal
     terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
 - **A4 — the change classifier treated an external project's `.js` as a security surface.** The
     built-in lists describe this plugin's own repository, so every unknown external source failed

@@ -356,6 +356,20 @@ test('the whole-section bypass is closed end to end', () => {
   }
 })
 
+test('status uses the strict verification fallback when the project file has parse problems', () => {
+  // The review tool already failed closed on this file; status used to print policy=off from
+  // the partial mapping, so the two surfaces described different gates for one project.
+  const dir = makeProject('verification:\n  policy enforced\n')
+  try {
+    const status = buildStatus({ exec: execFor(dir), config: resolveConfig({}), services })
+    assert.equal(status.effectiveConfig.verification.policy, 'enforced')
+    assert.equal(status.effectiveConfig.verification.policyUsable, false)
+    assert.match(renderStatus(status), /enforced/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a full init plus a legitimate section write leaves a usable, renderable project', async () => {
   const dir = makeProject(undefined)
   try {

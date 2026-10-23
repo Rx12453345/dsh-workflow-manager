@@ -344,7 +344,8 @@ async function main() {
       for (const mutant of MUTANTS) {
         if (only.size > 0 && !only.has(mutant.id)) continue
         const original = originals.get(mutant.file)
-        const occurrences = original.split(mutant.find).length - 1
+        const normalised = original.replace(/\r\n/g, '\n')
+        const occurrences = normalised.split(mutant.find).length - 1
         if (occurrences !== 1) {
           rows.push({ ...mutant, applied: false, problem: `literal occurs ${occurrences}x` })
           continue
@@ -352,7 +353,7 @@ async function main() {
         let output = ''
         let status = null
         try {
-          writeFileSync(mutant.file, original.replace(mutant.find, mutant.replace), 'utf8')
+          writeFileSync(mutant.file, normalised.replace(mutant.find, mutant.replace), 'utf8')
           const run = spawnSync(
             process.execPath,
             ['--test', '--test-isolation=none', 'test/status.test.mjs'],
@@ -387,6 +388,11 @@ async function main() {
         console.log(`  ${file.split('/').pop()}: ${current === hashes.get(file) ? 'intact' : `CHANGED ${hashes.get(file)} -> ${current}`}`)
       }
       console.log(`\nsources restored byte-for-byte: ${intact ? 'YES' : 'NO — INVESTIGATE'}`)
+      const applyFailed = rows.filter(row => !row.applied).length
+      const notCaught = rows.filter(row => row.applied && !row.caught).length
+      if (!intact) process.exitCode = 3
+      else if (applyFailed > 0) process.exitCode = 2
+      else if (notCaught > 0) process.exitCode = 1
     },
     { label: LABEL },
   )

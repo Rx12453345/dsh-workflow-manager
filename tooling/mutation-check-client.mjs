@@ -171,15 +171,17 @@ async function main() {
         return [...names]
       }
 
+      // A CRLF checkout must not turn a valid anchor into a skipped mutant.
+      const normalised = original.replace(/\r\n/g, '\n')
       const rows = []
       for (const mutant of MUTANTS) {
         if (only.size > 0 && !only.has(mutant.id)) continue
-        const occurrences = original.split(mutant.find).length - 1
+        const occurrences = normalised.split(mutant.find).length - 1
         if (occurrences !== 1) {
           rows.push({ ...mutant, applied: false, problem: `literal occurs ${occurrences}x` })
           continue
         }
-        const mutated = original.replace(mutant.find, mutant.replace)
+        const mutated = normalised.replace(mutant.find, mutant.replace)
         let output = ''
         let status = null
         try {
@@ -214,6 +216,13 @@ async function main() {
         if (row.failed.length) console.log(`     failing: ${row.failed.slice(0, 4).join(' ; ')}${row.failed.length > 4 ? ` (+${row.failed.length - 4})` : ''}`)
       }
       console.log(`\nsource restored byte-for-byte: ${before === after ? 'YES' : 'NO — INVESTIGATE'}`)
+      // AN APPLY-FAILED MUTANT IS NOT A PASS. This harness used to print the rows and exit 0,
+      // so a CRLF checkout silently skipped 3 of 13 mutants while looking green.
+      const applyFailed = rows.filter(row => !row.applied).length
+      const notCaught = rows.filter(row => row.applied && !row.caught).length
+      if (before !== after) process.exitCode = 3
+      else if (applyFailed > 0) process.exitCode = 2
+      else if (notCaught > 0) process.exitCode = 1
     },
     { label: LABEL },
   )

@@ -1261,6 +1261,20 @@ test('an unrecognised class fails closed rather than being read as "no declarati
   assert.equal(resolution.declared, null, 'an unusable class is not recorded as a declaration')
 })
 
+test('verification_depth raises the floor even when no class is declared', () => {
+  const raised = resolveVerificationDepth({
+    depth: VERIFICATION_DEPTHS.INDEPENDENT,
+    changedFiles: ['README.md'],
+  })
+  assert.equal(raised.depth, VERIFICATION_DEPTHS.INDEPENDENT)
+  assert.equal(raised.requestedDepth, VERIFICATION_DEPTHS.INDEPENDENT)
+  assert.equal(raised.refused, false)
+
+  const invalid = resolveVerificationDepth({ depth: 99, changedFiles: ['README.md'] })
+  assert.equal(invalid.refused, true)
+  assert.match(invalid.refusal, /not an integer/)
+})
+
 test('a malformed verification SECTION resolves to the strictest usable settings', () => {
   // An unusable config value must never be the reason less verification runs.
   const section = readVerificationPolicy('enforced')
@@ -1372,10 +1386,18 @@ test('an unclassified source file is treated as stricter than security', () => {
       `${spelling} must still be recognised as a security surface`,
     )
   }
-  // Unusable entries are reported rather than dropped.
+  // Unusable entries are reported AND fail closed: an entry the classifier cannot place is
+  // not evidence that nothing dangerous changed.
   const junk = classifyChange({ changedFiles: [null, '', 42] })
   assert.equal(junk.files.length, 0)
-  assert.match(junk.reasons.join(' '), /not a usable path/)
+  assert.equal(junk.class, 'security')
+  assert.match(junk.reasons.join(' '), /not a usable project-relative file/)
+
+  for (const unusable of ['lib/', 'lib/../lib/approval.js', '/abs/lib.js', 'C:/x/lib.js']) {
+    const result = classifyChange({ changedFiles: [unusable], selfProject: false })
+    assert.equal(result.class, 'security', `${unusable} must fail closed`)
+    assert.ok(result.rejected.includes(unusable), `${unusable} must be reported as rejected`)
+  }
 
   // THE TWO LOOKUPS ARE TESTED APART, so neither can silently cover for the other. The exact
   // comparison is reached only by a path written the way the repository writes it...
@@ -1416,9 +1438,10 @@ test('a project can declare its source roots, security files, and UI surfaces', 
   assert.deepEqual(unknown.unknown, ['other/tool.js'])
 
   // A `..` segment must not earn a source-root match: `lib/../secret.js` is outside `lib`, and
-  // treating it as ordinary logic would be a classification bypass. It is rejected evidence.
+  // treating it as ordinary logic would be a classification bypass. It is rejected evidence AND
+  // raises the security class; dropping it was still a bypass.
   const escape = declared('lib/../secret.js')
-  assert.equal(escape.class, null)
+  assert.equal(escape.class, 'security')
   assert.ok(escape.rejected.includes('lib/../secret.js'))
 
   const allowed = classifyChange({
@@ -1525,7 +1548,20 @@ test('harness selection follows the depth, not a hardcoded list', () => {
   assert.ok(depth1.covering.length > 1, 'the other client harnesses must still be listed as covering')
 
   const depth2 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESSES, files: ['lib/tools.js'] })
-  assert.deepEqual(depth2.required, ['mutation-check-approval.mjs', 'mutation-check-work-unit.mjs'])
+  assert.deepEqual(depth2.required, [
+    'mutation-check-approval.mjs',
+    'mutation-check-verification.mjs',
+    'mutation-check-work-unit.mjs',
+  ])
+
+  // Every covering harness includes the verification-depth harness's CFG/REVIEW/TOOLS targets.
+  for (const file of ['lib/config.js', 'lib/review.js', 'lib/tools.js']) {
+    const plan = harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: [file] })
+    assert.ok(
+      plan.required.includes('mutation-check-verification.mjs'),
+      `the verification harness must cover ${file}; got ${plan.required.join(', ')}`,
+    )
+  }
 
   // No file list: nothing can be selected, and that is REPORTED as a gap rather than as a clean skip.
   const noFiles = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESSES, files: [] })

@@ -263,15 +263,17 @@ async function main() {
 
       for (const mutant of MUTANTS) {
         const original = originals.get(mutant.file)
-        const occurrences = original.split(mutant.from).length - 1
+        // A CRLF checkout must not turn a valid anchor into a skipped mutant.
+        const normalised = original.replace(/\r\n/g, '\n')
+        const occurrences = normalised.split(mutant.from).length - 1
         if (occurrences !== 1) {
           rows.push({ ...mutant, verdict: 'HARNESS ERROR', note: `anchor occurs ${occurrences} times` })
           continue
         }
 
-        const mutated = original.replace(mutant.from, mutant.to)
+        const mutated = normalised.replace(mutant.from, mutant.to)
         try {
-          if (mutated === original) {
+          if (mutated === normalised) {
             rows.push({ ...mutant, verdict: 'HARNESS ERROR', note: 'the replacement changed nothing' })
             continue
           }

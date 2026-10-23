@@ -575,10 +575,11 @@ async function main() {
         return [...names]
       }
 
+      const normalised = original.replace(/\r\n/g, '\n')
       const rows = []
       for (const mutant of MUTANTS) {
         if (only.size > 0 && !only.has(mutant.id)) continue
-        const occurrences = original.split(mutant.find).length - 1
+        const occurrences = normalised.split(mutant.find).length - 1
         if (occurrences !== 1) {
           rows.push({ ...mutant, applied: false, problem: `literal occurs ${occurrences}x` })
           continue
@@ -586,7 +587,7 @@ async function main() {
         let output = ''
         let status = null
         try {
-          writeFileSync(CLIENT, original.replace(mutant.find, mutant.replace), 'utf8')
+          writeFileSync(CLIENT, normalised.replace(mutant.find, mutant.replace), 'utf8')
           const run = spawnSync(
             process.execPath,
             ['--test', '--test-isolation=none', 'test/status.test.mjs'],
@@ -629,6 +630,10 @@ async function main() {
       const missed = rows.filter(row => row.applied && !row.caught && !row.equivalent).length
       console.log(`\ncaught ${caught}/${applied - equivalent} killable mutants (${equivalent} declared behaviourally equivalent, ${missed} missed)`)
       console.log(`source restored byte-for-byte: ${before === after ? 'YES' : 'NO — INVESTIGATE'}`)
+      const applyFailed = rows.filter(row => !row.applied).length
+      if (before !== after) process.exitCode = 3
+      else if (applyFailed > 0) process.exitCode = 2
+      else if (missed > 0) process.exitCode = 1
     },
     { label: LABEL },
   )
