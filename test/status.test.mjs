@@ -31,6 +31,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { findChromium, gridStyles, measureLayout, sourceConst } from '../tooling/layout-styles.mjs'
+import { skipInSandbox } from './sandbox.mjs'
 
 import {
   buildStatus,
@@ -149,6 +150,28 @@ test('renderStatus survives a project with no workflow file at all', () => {
     const text = renderStatus(buildStatus({ exec: execFor(dir), config: resolveConfig({}), services }))
     assert.equal(typeof text, 'string')
     assert.match(text, /NOT opted in|inert/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('status resolves review availability the same way workflow_review does', () => {
+  // A1'S OTHER HALF. The status report must answer "would workflow_review find subagents
+  // right now", not merely "did the mount probe see it". The stub below exposes the service
+  // ONLY through get, which is the shape that produced "status: available / review:
+  // unavailable" on a real host.
+  const dir = makeProject('tier: standard\n')
+  try {
+    const status = buildStatus({ exec: execFor(dir), config: resolveConfig({}), services })
+    assert.equal(status.subagent.available, true)
+    assert.equal(status.subagent.probeAvailable, true)
+    assert.equal(status.effectiveConfig.evaluator.canReview, true)
+    assert.match(renderStatus(status), /review route: subagents resolved at call time/)
+
+    const missing = buildStatus({ exec: execFor(dir), config: resolveConfig({}), services: undefined })
+    assert.equal(missing.subagent.available, false)
+    assert.equal(missing.effectiveConfig.evaluator.canReview, false)
+    assert.match(renderStatus(missing), /independent review: NOT runnable/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -1937,6 +1960,7 @@ test('the panel hint spans its one column instead of creating a second', () => {
 })
 
 test('the shipped panel grid resolves to one column with a full-width label', async t => {
+  if (skipInSandbox(t, 'this case launches Chromium to measure layout; the sandbox cannot start the browser')) return
   const browser = findChromium()
   if (browser === undefined) {
     // The declaration-level test above already pins the fix; this one pins the OUTCOME, and

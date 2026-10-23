@@ -37,6 +37,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { skipInSandbox } from './sandbox.mjs'
 
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from '../tooling/mutation-lock.mjs'
 
@@ -213,7 +214,8 @@ test('a second acquisition fails loudly, naming the holder and forbidding concur
   )
 })
 
-test('independent processes race for the lock and exactly one wins per round', async () => {
+test('independent processes race for the lock and exactly one wins per round', async t => {
+  if (skipInSandbox(t, 'this case launches four child processes; the sandbox denies a piped child (EPERM)')) return
   for (let round = 1; round <= 3; round += 1) {
     const path = freshPath()
     const results = await raceForLock(path, { count: 4, holdMs: 2000 })
@@ -233,7 +235,8 @@ test('independent processes race for the lock and exactly one wins per round', a
   }
 })
 
-test('a live holder makes the next starter exit with the lock-held code', async () => {
+test('a live holder makes the next starter exit with the lock-held code', async t => {
+  if (skipInSandbox(t, 'this case launches a holder and an attacker; the sandbox denies a piped child (EPERM)')) return
   const path = freshPath()
   const holder = startHolder(path, 8000)
   const { seen } = outputContains(holder, 'ACQUIRED')
@@ -471,7 +474,8 @@ test('a parseable string timestamp is READ: a recent one is refused as live-insi
   }
 })
 
-test('the take-over is reported rather than silent', async () => {
+test('the take-over is reported rather than silent', async t => {
+  if (skipInSandbox(t, 'this case launches a holder child; the sandbox denies a piped child (EPERM)')) return
   const path = freshPath()
   writeLockFile(path, { pid: 0x7fffff0, at: Date.now(), host: 'gone-host', label: 'the killed harness' })
 
@@ -482,7 +486,8 @@ test('the take-over is reported rather than silent', async () => {
   assert.match(child.stderr, /label=the killed harness/)
 })
 
-test('a stale lock whose process was hard-killed is recovered, and the source is usable again', async () => {
+test('a stale lock whose process was hard-killed is recovered, and the source is usable again', async t => {
+  if (skipInSandbox(t, 'this case launches and hard-kills a holder; the sandbox denies a piped child (EPERM)')) return
   const path = freshPath()
   const holder = startHolder(path, 60000)
   const { seen } = outputContains(holder, 'ACQUIRED')
@@ -538,7 +543,8 @@ test('a thrown error releases the lock and propagates', async () => {
   assert.equal(ran, true, 'the next run is not blocked by the failed one')
 })
 
-test('a hard-killed holder leaves the lock behind, and the next run recovers it', async () => {
+test('a hard-killed holder leaves the lock behind, and the next run recovers it', async t => {
+  if (skipInSandbox(t, 'this case launches and hard-kills a holder; the sandbox denies a piped child (EPERM)')) return
   const path = freshPath()
   const holder = startHolder(path, 60000)
   const { seen } = outputContains(holder, 'ACQUIRED')

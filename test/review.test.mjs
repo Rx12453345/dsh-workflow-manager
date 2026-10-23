@@ -1907,4 +1907,75 @@ test('the declared class travels into the reviewer prompt through the tool', () 
   assert.equal(typeof service.start, 'function')
 })
 
+// ---------------------------------------------------------------------------
+// service resolution and verdict recording (A1 / A5)
+// ---------------------------------------------------------------------------
+
+test('workflow_review resolves subagents through ctx.get when the property is empty', async () => {
+  // THE A1 REGRESSION. `workflow_status` already probed `get` first, so it could see a service
+  // that `workflow_review` could not: the review read only `services.subagents` (the registration
+  // property) and the outer ctx. A get-only service is a real host shape; it must not turn into
+  // "the subagents service is unavailable" while the status report says "available".
+  const dir = makeVerificationProject('tier: standard\n')
+  try {
+    const { calls, service } = passingSubagents()
+    const def = buildReviewToolDefinition({
+      config: resolveConfig({}),
+      services: {
+        get(name) {
+          return name === 'subagents' ? service : undefined
+        },
+      },
+      ctx: {},
+    })
+    const result = await def.execute(
+      { feature: 'get-only service', acceptance: ['works'] },
+      verificationExec(dir),
+    )
+    assert.equal(result.ok, true, JSON.stringify(result).slice(0, 300))
+    assert.equal(result.status, 'reviewed')
+    assert.equal(calls.started, 1, 'the reviewer must start when subagents is reachable only through get')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a review that could not run is not recorded as a verdict', async () => {
+  // A5 AT THE WRITER. `runReview` returns `unavailable` when it has no service; recording that
+  // made `workflow_advance record-review` write a FAIL with null round/overall/fingerprint for an
+  // event that was never a review. The store must stay empty so record-review answers
+  // "no-review-recorded" instead of inventing evidence.
+  const dir = makeVerificationProject('tier: standard\n')
+  try {
+    const reviewOutcomes = new Map()
+    const def = buildReviewToolDefinition({ config: resolveConfig({}), reviewOutcomes })
+    const result = await def.execute({ feature: 'no reviewer' }, verificationExec(dir))
+    assert.equal(result.status, 'unavailable')
+    assert.equal(reviewOutcomes.size, 0, 'an unavailable review must not enter the verdict store')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a real verdict is recorded for workflow_advance to consume', async () => {
+  const dir = makeVerificationProject('tier: standard\n')
+  try {
+    const reviewOutcomes = new Map()
+    const { calls, service } = passingSubagents()
+    const def = buildReviewToolDefinition({ config: resolveConfig({}), reviewOutcomes })
+    const result = await def.execute(
+      { feature: 'a real review', acceptance: ['works'] },
+      verificationExec(dir, { subagents: service }),
+    )
+    assert.equal(result.status, 'reviewed')
+    assert.equal(calls.started, 1)
+    assert.equal(reviewOutcomes.size, 1, 'a reviewed verdict must be stored for the advance tool')
+    const [recorded] = [...reviewOutcomes.values()]
+    assert.equal(recorded.status, 'reviewed')
+    assert.equal(recorded.passed, true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 

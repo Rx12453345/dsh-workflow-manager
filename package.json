@@ -70,6 +70,7 @@
   },
   "scripts": {
     "status": "node bin/dsh-workflow.mjs status",
-    "test": "node --test test/"
+    "test": "node run-unit-tests.mjs",
+    "test:sandbox": "node run-unit-tests.mjs --sandbox"
   }
 }

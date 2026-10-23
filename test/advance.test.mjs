@@ -46,6 +46,7 @@ import {
 } from '../lib/advance.js'
 import { buildAdvanceToolDefinition, buildReviewToolDefinition, buildToolDefinition } from '../lib/tools.js'
 import { resolveConfig } from '../lib/config.js'
+import { reviewOutcomeKey } from '../lib/work-unit.js'
 
 /** A project directory with an optional `.dsh/workflow.yml` (its presence = opt-in). */
 function makeProject({ optIn = true, features, review } = {}) {
@@ -549,6 +550,51 @@ test('record-review is refused when this session never ran a review', async () =
       false,
       'the feature must remain incomplete',
     )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a stored non-verdict cannot be applied as a FAIL', async () => {
+  // A5 AT THE CONSUMER. The writer now refuses to store a non-verdict, but record-review must
+  // also refuse one that arrived another way (an older store, a hand-edited record, a future
+  // writer that forgets). "The review did not run" is not evidence for failure any more than it
+  // is evidence for success.
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null, reviewOutcomes: new Map() }
+    const def = buildAdvanceToolDefinition(options)
+    await def.execute(
+      {
+        action: 'advance',
+        to: 'PLAN',
+        features: [{ id: 'F001', description: 'first', steps: ['a'], priority: 1 }],
+      },
+      execFor(dir),
+    )
+    await def.execute({ action: 'advance', to: 'PICK' }, execFor(dir))
+    await def.execute({ action: 'pick' }, execFor(dir))
+
+    options.reviewOutcomes.set(reviewOutcomeKey(dir, null), {
+      at: new Date().toISOString(),
+      passed: false,
+      status: 'unavailable',
+      round: null,
+      overall: null,
+      reason: 'the subagents service is unavailable, so no independent review can run',
+      fingerprint: null,
+      files: [],
+      diff: '',
+      workUnit: null,
+    })
+
+    const refused = await def.execute({ action: 'record-review', feature_id: 'F001' }, execFor(dir))
+    assert.equal(refused.ok, false)
+    assert.equal(refused.status, 'review-not-reviewed')
+    const feature = readFeatures(dir).features.features[0]
+    assert.equal(feature.passes, false)
+    assert.equal(feature.attempts, 0, 'a review that did not run must not count as an attempt')
+    assert.equal(feature.blocked_reason, null, 'and it must not invent a blocked reason')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
