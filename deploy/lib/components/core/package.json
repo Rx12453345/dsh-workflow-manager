@@ -1,5 +1,0 @@
-{
-  "name": "dsh-workflow-core",
-  "description": "工作流核心：档位与开关、状态落盘、独立验收、审批强度。为工程提供可调且可关闭的 agent 工作流。",
-  "type": "module"
-}
