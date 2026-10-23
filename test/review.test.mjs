@@ -2054,7 +2054,10 @@ test('workflow_review resolves subagents through ctx.get when the property is em
     })
     const result = await def.execute(
       { feature: 'get-only service', acceptance: ['works'] },
-      verificationExec(dir),
+      // The exec record carries a decoy `subagents` that is NOT the service. It must not
+      // shadow the real one reachable only through `get`; that shape still produced
+      // "unavailable" on the live host after the first A1 resolution change.
+      verificationExec(dir, { subagents: {} }),
     )
     assert.equal(result.ok, true, JSON.stringify(result).slice(0, 300))
     assert.equal(result.status, 'reviewed')
