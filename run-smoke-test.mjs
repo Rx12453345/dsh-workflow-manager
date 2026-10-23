@@ -168,7 +168,20 @@ check('status definition has a render function', typeof def?.output?.render === 
 // ---- invoke the tool with NO exec at all -------------------------------------
 // Passing an explicit `{}` would be merged over the definition's own options, so
 // the degraded path is exercised by omitting the argument entirely.
-const noWorkspace = await def.execute({})
+//
+// HERMETIC, NOT CWD-DEPENDENT. The no-exec path falls back to process.cwd(), so running
+// the smoke test from a project that already has `.dsh/workflow.yml` made this case see an
+// opted-in project and fail two assertions. Run it from an empty temporary directory.
+const originalCwd = process.cwd()
+const emptyCwd = mkdtempSync(join(tmpdir(), 'dsh-wf-smoke-empty-'))
+let noWorkspace
+try {
+  process.chdir(emptyCwd)
+  noWorkspace = await def.execute({})
+} finally {
+  process.chdir(originalCwd)
+  rmSync(emptyCwd, { recursive: true, force: true })
+}
 check('execute works without a workspace', noWorkspace.ok === true)
 check('workspace resolution always yields a directory', typeof noWorkspace.project.projectDir === 'string')
 check('workspace source is reported', typeof noWorkspace.diagnostics?.workspaceSource === 'string')

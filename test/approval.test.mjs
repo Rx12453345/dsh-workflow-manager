@@ -2529,6 +2529,65 @@ test('the workflow_set tool asks the user, writes only on an exact approval, and
     assert.doesNotMatch(child.reason, /constraint ledger/i)
     assert.doesNotMatch(child.reason, /value=llm-only|value=off/)
     assert.doesNotMatch(readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'), /strength: off/)
+
+    // A verification-classification write is a safety-gate write too. It must ask, and a
+    // child that cannot be asked must not get ok:true/changed:true.
+    const childVerification = await define({
+      async ask() {
+        throw Object.assign(new Error('delegated'), { code: 'DELEGATED_CALLER' })
+      },
+    }).execute({ path: 'verification.allowUnknownSources', value: true }, makeExec({ cwd: dir }))
+    assert.equal(childVerification.ok, false)
+    assert.equal(childVerification.status, 'confirmation-failed')
+    assert.doesNotMatch(
+      readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'),
+      /allowUnknownSources/,
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
+})
+
+test('a confirmation for one verification axis does not clear the approval memory', async () => {
+  // THE CROSS-AXIS FLUSH. `forgetApprovalSnapshot` used to run for every confirmed
+  // weakening write, so a user approving `verification.policy: off` also made an earlier
+  // direct edit of `approval.strength` effective. Only an approval-axis write may clear it.
+  clearApprovalStateCache()
+  const dir = makeProject('tier: standard\napproval:\n  strength: ask-user\n')
+  try {
+    const exec = makeExec({ cwd: dir })
+    const seeded = resolveApprovalState(exec, {}, { defaults: DEFAULTS })
+    assert.equal(seeded.gate.strength, 'ask-user')
+
+    // A direct edit is not a user-confirmed write and must not become effective.
+    writeFileSync(join(dir, '.dsh', 'workflow.yml'), 'tier: standard\napproval:\n  strength: llm-only\n', 'utf8')
+    assert.equal(resolveApprovalState(exec, {}, { defaults: DEFAULTS }).gate.strength, 'ask-user')
+
+    const tool = buildSetToolDefinition({
+      config: resolveConfig({}),
+      ctx: null,
+      services: null,
+      getUserQuestions: () => ({
+        async ask({ questions }) {
+          return {
+            answers: [
+              {
+                id: questions[0].id,
+                selected: ['Apply this approval-gate change'],
+                custom: null,
+              },
+            ],
+          }
+        },
+      }),
+    })
+    const result = await tool.execute({ path: 'verification.policy', value: 'off' }, exec)
+    assert.equal(result.ok, true, JSON.stringify(result).slice(0, 300))
+    assert.equal(result.changed, true)
+    // The verification write happened, but the approval axis must still be the gate the
+    // session stored, not the value written directly to the file.
+    assert.equal(resolveApprovalState(exec, {}, { defaults: DEFAULTS }).gate.strength, 'ask-user')
   } finally {
     rmSync(dir, { recursive: true, force: true })
     clearApprovalStateCache()

@@ -723,7 +723,7 @@ const MUTANTS = [
     id: 'M63',
     what: 'a user-confirmed weakening write does not reset the monotonic snapshot, so it never takes effect',
     file: 'lib/tools.js',
-    find: `  if (weakening.length > 0 && written.written === true) {
+    find: `  if (approvalWeakened && written.written === true) {
     forgetApprovalSnapshot(workspace.dir)
   }`,
     replace: `  if (false) {
@@ -736,8 +736,8 @@ const MUTANTS = [
     id: 'M64',
     what: 'workflow_set applies a weakening write without asking the user',
     file: 'lib/tools.js',
-    find: `  if (weakening.length > 0) {`,
-    replace: `  if (false && weakening.length > 0) {`,
+    find: `  if (requiresConfirmation) {`,
+    replace: `  if (false && requiresConfirmation) {`,
     suite: 'unit',
     expect: /confirmation-required|user confirmation/,
   },
@@ -819,21 +819,26 @@ async function main() {
       const missed = []
       for (const mutant of MUTANTS) {
         const path = `${ROOT}/${mutant.file}`
-        const original = readFileSync(path, 'utf8')
-        if (!original.includes(mutant.find)) {
+        const originalBuffer = readFileSync(path)
+        const original = originalBuffer.toString('utf8')
+        // ANCHORS ARE LF IN THE SOURCE AND MAY BE CRLF IN A WINDOWS CHECKOUT. Matching the
+        // raw bytes skipped 29 mutants in a clean CRLF copy and still exited 0, so a green
+        // summary could mean "the tests are fine" when the mutants were never applied.
+        const normalised = original.replace(/\r\n/g, '\n')
+        if (!normalised.includes(mutant.find)) {
           console.log(`?? ${mutant.id}: the anchor did not match — mutant not applied (${mutant.what})`)
           missed.push(`${mutant.id} (anchor mismatch)`)
           continue
         }
-        const mutated = original.replace(mutant.find, mutant.replace)
-        if (mutated === original) {
+        const mutated = normalised.replace(mutant.find, mutant.replace)
+        if (mutated === normalised) {
           console.log(`?? ${mutant.id}: the replacement changed nothing`)
           missed.push(`${mutant.id} (no-op)`)
           continue
         }
         try {
           writeFileSync(path, mutated, 'utf8')
-          appliedMutant = original
+          appliedMutant = originalBuffer
           currentFile = path
           const result = run(mutant.suite)
           const red = result.status !== 0
@@ -849,20 +854,36 @@ async function main() {
             console.log(`!! ${mutant.id} SURVIVED (${mutant.suite} exit 0): ${mutant.what}`)
           }
         } finally {
-          writeFileSync(path, original, 'utf8')
+          writeFileSync(path, originalBuffer)
           appliedMutant = null
           currentFile = null
+          // BYTE-FOR-BYTE, ASSERTED PER FILE. The old harness wrote the captured string and
+          // never compared it; the green post-restore suite could not detect a changed line
+          // ending in a file the tests do not read.
+          if (!readFileSync(path).equals(originalBuffer)) {
+            throw new Error(`${mutant.file} was not restored byte-for-byte after ${mutant.id}`)
+          }
         }
       }
 
       console.log(`\n${caught}/${MUTANTS.length} mutants caught`)
       if (missed.length) console.log(`survivors: ${missed.join(', ')}`)
+      console.log('sources restored byte-for-byte: YES')
 
       // Restore-and-verify: the suite must be green again after every mutation was reverted.
       const after = run('unit')
       const afterSmoke = run('smoke')
       console.log(`post-restore unit: exit ${after.status}; smoke: exit ${afterSmoke.status}`)
-      return { baselineOk: true, green: after.status === 0 && afterSmoke.status === 0 }
+      // A HARNESS THAT CANNOT FAIL IS NOT A CHECK. An unmatched anchor or a surviving mutant
+      // makes the run a failure even when the post-restore suite is green.
+      return {
+        baselineOk: true,
+        green:
+          after.status === 0 &&
+          afterSmoke.status === 0 &&
+          missed.length === 0 &&
+          caught === MUTANTS.length,
+      }
     },
     { label: LABEL },
   )

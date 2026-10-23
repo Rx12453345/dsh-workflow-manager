@@ -1898,6 +1898,25 @@ const verificationExec = (dir, extra = {}) => ({
 
 const enforcedProject = 'verification:\n  policy: enforced\n'
 
+test('an unparseable project file refuses to run verification as "not configured"', async () => {
+  // `policy enforced` without the colon is a parse problem. The file reader still returns
+  // the partial mapping, and merging it made readVerificationPolicy see no policy and run
+  // under `off`. The review must fail closed on the file it could not fully read.
+  const dir = makeVerificationProject('tier: standard\nverification:\n  policy enforced\n  sources:\n    - lib\n')
+  try {
+    const def = buildReviewToolDefinition({ config: resolveConfig({}) })
+    const result = await def.execute(
+      { feature: 'malformed project file', class: 'docs', changed_files: ['README.md'] },
+      verificationExec(dir),
+    )
+    assert.equal(result.ok, false, JSON.stringify(result).slice(0, 300))
+    assert.notEqual(result.status, 'reviewed')
+    assert.match(result.reason, /confirm|verification/i)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('the workflow_review tool refuses a depth the user did not confirm', async () => {
   // With confirmation `always`, a review that cannot ask must NOT proceed. This is the reachable
   // form of "the user's half of the decision is not fictional": if an unsatisfiable ask merely

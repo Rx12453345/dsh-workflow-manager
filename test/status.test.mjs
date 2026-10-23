@@ -128,7 +128,7 @@ test('status accepts startActivation and prefers a service-shaped property over 
     assert.equal(status.subagent.reviewRoute.method, 'startActivation')
     assert.equal(status.subagent.reviewRoute.probeHasStart, true)
     assert.equal(status.effectiveConfig.evaluator.canReview, true)
-    assert.match(renderStatus(status), /probe service start=yes/)
+    assert.match(renderStatus(status), /probe service startActivation=yes/)
 
     // `get` can return a facade that is not the service; the property still carries the
     // real one. Resolution must be by shape, not by which route returned a non-null value.
@@ -356,20 +356,42 @@ test('the whole-section bypass is closed end to end', () => {
   }
 })
 
-test('a full init plus a legitimate section write leaves a usable, renderable project', () => {
+test('a full init plus a legitimate section write leaves a usable, renderable project', async () => {
   const dir = makeProject(undefined)
   try {
     const exec = execFor(dir)
     const init = runInit({ exec, config: resolveConfig({}), requested: { tier: 'standard' } })
     assert.equal(init.ok, true, JSON.stringify(init))
 
-    const write = runSet({
+    // A gate section is confirmable even when this particular edit is a strengthening:
+    // the writer cannot enumerate every shape a hand-edited value can take, so it asks for
+    // the section rather than trusting its own delta model.
+    const refused = runSet({
       exec,
       config: resolveConfig({}),
       path: 'evaluator',
       value: { bar: 9, maxRounds: 2 },
       hasValue: true,
     })
+    assert.equal(refused.status, 'confirmation-required')
+
+    const tool = buildSetToolDefinition({
+      config: resolveConfig({}),
+      getUserQuestions: () => ({
+        async ask({ questions }) {
+          return {
+            answers: [
+              {
+                id: questions[0].id,
+                selected: ['Apply this approval-gate change'],
+                custom: null,
+              },
+            ],
+          }
+        },
+      }),
+    })
+    const write = await tool.execute({ path: 'evaluator', value: { bar: 9, maxRounds: 2 } }, exec)
     assert.equal(write.ok, true, JSON.stringify(write))
 
     const text = renderStatus(buildStatus({ exec, config: resolveConfig({}), services }))

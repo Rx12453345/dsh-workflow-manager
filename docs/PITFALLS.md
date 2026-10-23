@@ -301,9 +301,12 @@ the files) and that piped stdio is refused in this sandbox (EPERM), hence `stdio
 `NEXT-STEPS.md:760–766`.
 
 ### Restoration verification is weaker than it looks
-`mutation-check-approval.mjs` judges restoration **indirectly** (unit + smoke go green after rollback) and
-never compares bytes; and `tooling/mutation-check-lock-probe.mjs` is a one-shot probe, not one of the
-official harnesses, and is **not wired into the lock**. **BELIEVED** (read from the journal and scripts).
+`mutation-check-approval.mjs` judged restoration **indirectly** (unit + smoke go green after rollback) and
+never compared bytes; it also exited 0 when an anchor failed or a mutant survived. Fixed: every restore is
+compared with the original **Buffer**, anchor matching folds `\r\n`, and `missed.length > 0` or
+`caught !== MUTANTS.length` exits 1. `tooling/mutation-check-lock-probe.mjs` is still a one-shot probe,
+not one of the official harnesses, and is **not wired into the lock**. **VERIFIED** for the approval
+harness (`sources restored byte-for-byte: YES`, 66/66); the lock-probe caveat remains.
 `NEXT-STEPS.md:2885–2886, 3031–3035`.
 
 ---
@@ -550,14 +553,19 @@ project work**. A remedy that changes the approval or verification gate is a **h
 path=approval.strength value=llm-only` as the remedy when `ask-user` could not be satisfied, and the
 refusal text said the same. A delegated child — whose approval policy is `never`, so every prompt is
 auto-denied — read that, ran the command, and then wrote what the gate had refused. The model was not
-misbehaving; the system handed it a self-authorization and called it a remedy. The fix has four parts:
-the refusal text names only a human action; `workflow_set` refuses a weakening write unless a real user
-confirms it, and a child cannot ask; the pre-execute gate classifies such a write as medium so the gate
-participates; and the process keeps the strongest gate it has seen per project, so a direct file edit or
-a deleted opt-in file cannot lower or switch off the gate mid-session. A weaker file takes effect on a
-restart (or after a user-confirmed write), which is the only point at which it is genuinely the user's
-configuration. **VERIFIED** by `test/approval.test.mjs` (the incident replay, the direct-edit and
-delete cases) and the runtime's own status line. `TESTING.md:91–112`.
+misbehaving; the system handed it a self-authorization and called it a remedy. The fix has six parts:
+the refusal text names only a human action; `workflow_set` refuses a safety-gate write unless a real user
+confirms it, and a child cannot ask; the pre-execute gate classifies every approval/evaluator/verification
+write as medium so the gate participates; the gate judges the **explicit `workspace_dir` target** of a
+`workflow_set`/`workflow_init`, not only the session cwd; the confirmation wording names the gate (not the
+constraint ledger) and says the child refusal is automatic; and the process keeps the strongest gate it
+has seen per project, so a direct file edit or a deleted opt-in file cannot lower or switch off the gate
+mid-session. A verification-only confirmation must **not** clear that memory; the writer measures a
+non-approval delta against the file, so it cannot legitimise an earlier direct approval edit. A weaker
+file takes effect on a restart (or after a user-confirmed approval write), which is the only point at
+which it is genuinely the user's configuration. **VERIFIED** by `test/approval.test.mjs` (the incident
+replay, the direct-edit, delete and cross-axis cases) and the runtime's own status line.
+`TESTING.md:91–112`.
 
 ### Do not measure a moving tree
 Seven test failures appeared mid-round while another agent was editing `lib/client.js`, and a separate

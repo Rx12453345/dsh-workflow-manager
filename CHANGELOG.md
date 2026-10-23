@@ -47,13 +47,16 @@ synced and DSH restarted, the running plugin does not have it.
     it now judges the explicit target project for `workflow_set`/`workflow_init`. And the shared
     confirmation helper hardcoded the constraint-ledger sentence, so a refused gate write named the
     wrong file; the wording is now parameterised, says the refusal is automatic rather than a human
-    declining, and names the root-conversation/user remedy. `workflow_status` reports
+    declining, and names the root-conversation/user remedy. Every write to an approval/evaluator/
+    verification section is now confirmable, not only a delta the writer models; the delta for a
+    non-approval write is measured against the file, so confirming a verification change cannot clear
+    the approval memory and legitimise an earlier direct edit. `workflow_status` reports
     `DOWNGRADE IGNORED` / `OPT-IN FILE MISSING`. The decision to
     make it strict was the user's: the agent cannot change the gate on its own.
 - **A3 — the test runner was blocked by the DSH sandbox.** `npm test` now runs `run-unit-tests.mjs`,
     which detects the sandbox's piped-child `EPERM` and sets `DSH_WORKFLOW_SANDBOX=1`; the six
     environment-dependent tests (five mutation-lock races and the Chromium layout measurement) skip with
-    a visible reason, so the suite is 510 tests / 503 pass / 7 skip / 0 fail in the sandbox. A normal
+    a visible reason, so the suite is 513 tests / 506 pass / 7 skip / 0 fail in the sandbox. A normal
     terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
 - **A4 — the change classifier treated an external project's `.js` as a security surface.** The
     built-in lists describe this plugin's own repository, so every unknown external source failed
@@ -61,7 +64,9 @@ synced and DSH restarted, the running plugin does not have it.
     `allowUnknownSources: true`; the built-in lists apply only to the installed plugin's own package;
     an invalid classification is ignored as a whole, not half-applied. Under `advisory`, a contradicted
     declaration now says `DECLARATION CONTRADICTED` instead of printing `CLASS REFUSED` for a refusal
-    that did not happen; `enforced` still refuses.
+    that did not happen; `enforced` still refuses. A project file the parser could not fully read is
+    no longer merged as "verification not configured": the review uses the strict fallback
+    (`enforced`/`always`, unusable classification) instead of silently running under `off`.
 - **A5 — a review that did not run was recorded as a FAIL.** `workflow_review` stored every
     `runReview` outcome; `unavailable`/`misconfigured`/`exhausted`/`incomplete` then became
     `passes:false`, `attempts+1`, a `blocked_reason`, and an evidence row with null
