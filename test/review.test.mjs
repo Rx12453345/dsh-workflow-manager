@@ -1842,20 +1842,48 @@ function passingSubagents() {
       async start() {
         calls.started += 1
         return {
-          result: Promise.resolve({
-            stopReason: 'completed',
-            structured: {
-              perDimension: DEFAULT_DIMENSIONS.map(dimension => ({
-                dimension,
-                score: 9,
-                rationale: 'verified',
-              })),
-              issues: [],
-              verified: ['ran the suite'],
-            },
-            output: [],
-          }),
+          result: Promise.resolve(passingTerminal()),
           dispose: async () => {},
+        }
+      },
+    },
+  }
+}
+
+/** The terminal a passing reviewer returns; shared by the two service shapes. */
+function passingTerminal() {
+  return {
+    stopReason: 'completed',
+    structured: {
+      perDimension: DEFAULT_DIMENSIONS.map(dimension => ({
+        dimension,
+        score: 9,
+        rationale: 'verified',
+      })),
+      issues: [],
+      verified: ['ran the suite'],
+    },
+    output: [],
+  }
+}
+
+/**
+ * The CURRENT host's service shape: `startActivation(spec)` and no `start`.
+ * The receipt still has `result`/`dispose`, which is the contract the review needs.
+ */
+function activationOnlySubagents() {
+  const calls = { started: 0, spec: null, disposed: 0 }
+  return {
+    calls,
+    service: {
+      async startActivation(spec) {
+        calls.started += 1
+        calls.spec = spec
+        return {
+          result: Promise.resolve(passingTerminal()),
+          async dispose() {
+            calls.disposed += 1
+          },
         }
       },
     },
@@ -2062,6 +2090,44 @@ test('workflow_review resolves subagents through ctx.get when the property is em
     assert.equal(result.ok, true, JSON.stringify(result).slice(0, 300))
     assert.equal(result.status, 'reviewed')
     assert.equal(calls.started, 1, 'the reviewer must start when subagents is reachable only through get')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('workflow_review uses startActivation when the host exposes only that API', async () => {
+  // THE LIVE HOST'S SHAPE. `@deepseek-ai/dsh-subagent` currently exposes
+  // `startActivation(spec)` and no `start`; the first A1 fix required `start()` and
+  // therefore rejected the real service. The receipt is still `{ result, dispose }`, and
+  // the child's structured result still arrives through `result`, so only the start call
+  // has to adapt.
+  const dir = makeVerificationProject('tier: standard\n')
+  try {
+    const { calls, service } = activationOnlySubagents()
+    const def = buildReviewToolDefinition({
+      config: resolveConfig({}),
+      services: {
+        get(name) {
+          return name === 'subagents' ? service : undefined
+        },
+      },
+      ctx: {},
+    })
+    const result = await def.execute(
+      { feature: 'current-host API', acceptance: ['works'] },
+      // A decoy must not shadow the real service, and the real service must be accepted
+      // even though it has no `start`.
+      verificationExec(dir, { subagents: {} }),
+    )
+    assert.equal(result.ok, true, JSON.stringify(result).slice(0, 300))
+    assert.equal(result.status, 'reviewed')
+    assert.equal(calls.started, 1, 'the reviewer must start through startActivation')
+    assert.equal(calls.spec.provider, 'spawn')
+    assert.equal(calls.spec.delivery, 'caller', 'a review is a one-shot caller-owned activation')
+    assert.equal(calls.spec.request.parent.id, 'agent-1', 'the exact calling agent must be the parent')
+    assert.equal(calls.spec.request.outputSchema.type, 'object')
+    assert.equal(typeof calls.spec.signal?.throwIfAborted, 'function')
+    assert.equal(calls.disposed, 1, 'the activation must be disposed after the review')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

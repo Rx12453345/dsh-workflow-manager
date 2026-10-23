@@ -26,7 +26,15 @@ synced and DSH restarted, the running plugin does not have it.
     then the property; review read `exec.subagents`, the registration-time property, and the OUTER
     context, so a service reachable only through `get` was invisible to review. Both now use one
     `resolveSubagents()` at call time; `lib/index.js` passes a live getter; status prints a separate
-    `review route:` line. A get-only regression test asserts the reviewer actually starts.
+    `review route:` line.
+    The service API also has two generations: older hosts expose `subagents.start(provider, request)`,
+    while the current host exposes `subagents.startActivation(spec)` and **no `start`**. Requiring
+    `start()` (the first A1 fix) correctly rejected a decoy but also rejected the real current-host
+    service, which is why the live status said `probe service start=NO`. Resolution now accepts either
+    entry point and prefers a service-shaped property over a `get` facade; the review calls
+    `startActivation({ provider, label, request, signal, delivery: 'caller' })` when that is what the
+    host has. Regression tests cover a get-only service, a decoy, `startActivation`-only, and the
+    get-facade/property fallback.
 - **A2 — the approval gate could be lowered by the session it judges.** The refusal text named
     `workflow_set path=approval.strength value=llm-only/off`; `workflow_set` was classified `low`; the
     write needed no confirmation and took effect on the next call. That is a self-authorization, and it
@@ -34,12 +42,18 @@ synced and DSH restarted, the running plugin does not have it.
     (root can apply one only after a real `userQuestions` confirmation, a child cannot); the pre-execute
     gate classifies gate-setting writes as `medium`; and the process keeps the strongest gate it has
     seen per project, so a direct file edit or a deleted opt-in file cannot lower or switch it off until
-    a restart. `workflow_status` reports `DOWNGRADE IGNORED` / `OPT-IN FILE MISSING`. The decision to
+    a restart. A live child probe exposed two more holes in the gate layer: the pre-execute resolver
+    read only the session cwd, so `workflow_set workspace_dir=<target>` could leave the gate inert;
+    it now judges the explicit target project for `workflow_set`/`workflow_init`. And the shared
+    confirmation helper hardcoded the constraint-ledger sentence, so a refused gate write named the
+    wrong file; the wording is now parameterised, says the refusal is automatic rather than a human
+    declining, and names the root-conversation/user remedy. `workflow_status` reports
+    `DOWNGRADE IGNORED` / `OPT-IN FILE MISSING`. The decision to
     make it strict was the user's: the agent cannot change the gate on its own.
 - **A3 — the test runner was blocked by the DSH sandbox.** `npm test` now runs `run-unit-tests.mjs`,
     which detects the sandbox's piped-child `EPERM` and sets `DSH_WORKFLOW_SANDBOX=1`; the six
     environment-dependent tests (five mutation-lock races and the Chromium layout measurement) skip with
-    a visible reason, so the suite is 508 tests / 501 pass / 7 skip / 0 fail in the sandbox. A normal
+    a visible reason, so the suite is 510 tests / 503 pass / 7 skip / 0 fail in the sandbox. A normal
     terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
 - **A4 — the change classifier treated an external project's `.js` as a security surface.** The
     built-in lists describe this plugin's own repository, so every unknown external source failed

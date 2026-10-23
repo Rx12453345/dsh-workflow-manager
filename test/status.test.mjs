@@ -115,6 +115,37 @@ test('renderStatus never throws for any hand-editable evaluator value', () => {
   }
 })
 
+test('status accepts startActivation and prefers a service-shaped property over a get facade', () => {
+  // THE CURRENT HOST. `@deepseek-ai/dsh-subagent` exposes `startActivation`, not `start`.
+  // A report that only recognized `start` said "review route: ... start=NO" and disabled
+  // reviews even though the service was present and could run one.
+  const dir = makeProject('tier: standard\n')
+  try {
+    const service = { async startActivation() {} }
+    const activationOnly = { get: name => (name === 'subagents' ? service : undefined) }
+    const status = buildStatus({ exec: execFor(dir), config: resolveConfig({}), services: activationOnly })
+    assert.equal(status.subagent.available, true)
+    assert.equal(status.subagent.reviewRoute.method, 'startActivation')
+    assert.equal(status.subagent.reviewRoute.probeHasStart, true)
+    assert.equal(status.effectiveConfig.evaluator.canReview, true)
+    assert.match(renderStatus(status), /probe service start=yes/)
+
+    // `get` can return a facade that is not the service; the property still carries the
+    // real one. Resolution must be by shape, not by which route returned a non-null value.
+    const facade = { prompt() {} }
+    const facadeThenProperty = {
+      get: name => (name === 'subagents' ? facade : undefined),
+      subagents: service,
+    }
+    const fallback = buildStatus({ exec: execFor(dir), config: resolveConfig({}), services: facadeThenProperty })
+    assert.equal(fallback.subagent.available, true)
+    assert.equal(fallback.subagent.reviewRoute.method, 'startActivation')
+    assert.equal(fallback.effectiveConfig.evaluator.canReview, true)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a broken gate is REPORTED in the status, not silently printed as healthy', () => {
   // The dangerous state is a project that looks configured while every review is
   // refused. The status must say so.

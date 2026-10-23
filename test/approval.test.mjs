@@ -972,6 +972,35 @@ test('the gate is inert until a project opts in, unless requireOptIn is false', 
   }
 })
 
+test('a workflow_set target project selects the gate, not the session cwd', () => {
+  // THE A2 PROBE SHAPE. A delegated child inherited a session cwd that was not opted in,
+  // while its workflow_set call named an opted-in project. The gate read only the session
+  // cwd, stayed inert, and the tool's own confirmation did all the work. The pre-execute
+  // listener must judge the project the write will actually change.
+  clearApprovalStateCache()
+  const sessionDir = mkdtempSync(join(tmpdir(), 'dsh-wf-session-'))
+  const targetDir = makeProject('tier: standard\napproval:\n  strength: ask-user\n')
+  try {
+    const exec = makeExec({
+      cwd: sessionDir,
+      name: 'workflow_set',
+      arguments: {
+        path: 'approval.strength',
+        value: 'llm-only',
+        workspace_dir: targetDir,
+      },
+    })
+    const state = resolveApprovalState(exec, {}, { defaults: DEFAULTS })
+    assert.equal(state.projectDir, targetDir)
+    assert.equal(state.active, true)
+    assert.equal(state.gate.strength, 'ask-user')
+  } finally {
+    rmSync(sessionDir, { recursive: true, force: true })
+    rmSync(targetDir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
+})
+
 test('the project file selects the strength, and the row config is the base layer', () => {
   clearApprovalStateCache()
   const dir = makeProject('approval:\n  strength: llm-only\n  withhold: 1\n')
@@ -2493,6 +2522,12 @@ test('the workflow_set tool asks the user, writes only on an exact approval, and
     assert.equal(child.ok, false)
     assert.equal(child.status, 'confirmation-failed')
     assert.match(child.reason, /delegated child/i)
+    // The refusal must name the gate, not the constraint ledger, and must name a human
+    // remedy. A shared ask helper used to leak the ledger sentence into a gate write.
+    assert.match(child.reason, /approval\/verification gate/i)
+    assert.match(child.reason, /root conversation|settings page|user/i)
+    assert.doesNotMatch(child.reason, /constraint ledger/i)
+    assert.doesNotMatch(child.reason, /value=llm-only|value=off/)
     assert.doesNotMatch(readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'), /strength: off/)
   } finally {
     rmSync(dir, { recursive: true, force: true })

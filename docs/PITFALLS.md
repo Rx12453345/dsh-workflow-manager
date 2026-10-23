@@ -36,6 +36,15 @@ A probe for `subagent` is permanently `absent`. Fix: use the plural, and get the
 `prompt` is a block array, `parent` is required, `run.result` is a Promise, `run.dispose()` must run on
 every path, and only `stopReason === 'completed'` is success. **VERIFIED.** `NEXT-STEPS.md:799–801`.
 
+### The `subagents` service has two start APIs
+Older hosts expose `subagents.start(provider, request)`. The current
+`@deepseek-ai/dsh-subagent` exposes `subagents.startActivation(spec)` and **no `start`**. Requiring
+`start()` therefore rejects the real service: status says `probe service start=NO`, while the mount
+probe still says `subagents=present`, and `workflow_review` returns `unavailable`. Both entry points
+return the same `{ result, dispose }` receipt, so accept either and adapt at the start call. The
+`get` route can return a facade without the entry point while the property carries the real service,
+so probe by shape, not by non-nullness. **VERIFIED on the real host** — see A1 in `CHANGELOG.md`.
+
 ### `maxDepth` is an absolute tree bound, and 1 forbade this plugin's own architecture
 `SubagentDepthError` when a reviewer was created inside an orchestrating child: depth accumulates down the
 tree, so main(0) → child(1) → reviewer(2) needs 2, while the constant was commented "LOCKED: prevents
