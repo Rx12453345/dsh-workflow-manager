@@ -1,12 +1,14 @@
 # P1: one harness running, a second started while it runs.
 # The real hazard: two harnesses on the SAME file (client.js), which is what happened.
 $ErrorActionPreference = 'Stop'
-$root = 'D:\DSH\P5\src-12453345_-dsh-workflow'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$proofDir = Join-Path $env:TEMP 'dsh-workflow-lock-proofs'
+New-Item -ItemType Directory -Force $proofDir | Out-Null
 $tooling = Join-Path $root 'tooling'
 $lock = Join-Path $tooling '.mutation-lock'
-$outA = 'D:\DSH\P5\p1-a.log'
-$outB = 'D:\DSH\P5\p1-b.log'
-$errB = 'D:\DSH\P5\p1-b.err'
+$outA = (Join-Path $proofDir 'p1-a.log')
+$outB = (Join-Path $proofDir 'p1-b.log')
+$errB = (Join-Path $proofDir 'p1-b.err')
 foreach ($p in @($lock, $outA, $outB, $errB)) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
 
 $client = Join-Path $root 'lib\client.js'
@@ -18,7 +20,7 @@ Write-Output ''
 # A: the client harness, M12 only (enough that it holds the lock for a few seconds).
 # B: the panel harness, M1 only — same file (client.js), so this is exactly the pair that
 #    left two mutants applied on 2026-10-12.
-$a = Start-Process -FilePath node -ArgumentList 'tooling/mutation-check-client.mjs', 'M12' -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $outA -RedirectStandardError 'D:\DSH\P5\p1-a.err'
+$a = Start-Process -FilePath node -ArgumentList 'tooling/mutation-check-client.mjs', 'M12' -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $outA -RedirectStandardError $errB
 Write-Output "A = tooling/mutation-check-client.mjs M12  (pid $($a.Id))"
 
 $deadline = (Get-Date).AddSeconds(60)

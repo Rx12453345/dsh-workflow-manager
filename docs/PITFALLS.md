@@ -440,10 +440,11 @@ exception. Fix: both halves register in the **same** `whileServed` callback and 
 **same** disposer, and the second argument is an **icon component** rendered inside the button with
 `{ size, active }`, not a page. **VERIFIED** at source level. `NEXT-STEPS.md:2167–2180`.
 
-### `simulate-client-scan.mjs` parses the installed copy
-By design; to check the workspace copy, pass the path explicitly. No simulation replaces the real window:
-if anything mismatches, bring back the console output and a screenshot. **VERIFIED.**
-`NEXT-STEPS.md:3183, 2143`.
+### `simulate-client-scan.mjs` needs the shipped bundle, not a vendored copy
+It scans the current checkout by default and requires
+`DSH_CLIENT_MODULES_BUNDLE=<extracted>/dsh-client-modules/lib/index.js`; the host implementation is not
+vendored. No simulation replaces the real window: if anything mismatches, bring back the console output
+and a screenshot. **VERIFIED.** `NEXT-STEPS.md:3183, 2143`.
 
 ---
 

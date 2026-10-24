@@ -19,7 +19,7 @@ pitfall it comes from is cited, and the incident really happened.
 Working directory for everything below:
 
 ```powershell
-cd D:\DSH\P5\src-12453345_-dsh-workflow
+cd <plugin-checkout>
 ```
 
 ---
@@ -47,18 +47,16 @@ npm test                                     # expect: 0 fail; 7 skips in the DS
 npm run test:sandbox                         # force the sandbox profile; the six environment tests skip with a reason
 node run-smoke-test.mjs                      # expect: "smoke test passed"
 node run-config-check.mjs                    # expect: two OK lines, and "resolved maxDepth is 2"
-node tooling/validate-tool-definition.mjs    # expect: "all 6 tool definitions are acceptable to the shipped registry"
+$env:DSH_TOOLS_BUNDLE = '<extracted>/dsh-tools/lib/index.js'; node tooling/validate-tool-definition.mjs
 node tooling/check-installed-config.mjs      # every entry exports a Config the host accepts
-node tooling/simulate-client-scan.mjs        # is the browser half discoverable?
+$env:DSH_CLIENT_MODULES_BUNDLE = '<extracted>/dsh-client-modules/lib/index.js'; node tooling/simulate-client-scan.mjs
 node tooling/sync-to-profile.mjs --check     # expect: 0 differ
 ```
 
-`tooling/check-config-schema.mjs` needs schemastery, so run it from the profile directory:
-
-```powershell
-cd C:\Users\dengh\.dsh\profiles\desktop
-node D:\DSH\P5\src-12453345_-dsh-workflow\tooling\check-config-schema.mjs
-```
+`check-config-schema.mjs` derives the checkout from its own location and resolves schemastery from
+the profile (`DSH_PROFILE_DIR`, default `~/.dsh/profiles/desktop`). The shipped-bundle tools need
+`DSH_TOOLS_BUNDLE` / `DSH_CLIENT_MODULES_BUNDLE`, because the host implementation is not vendored
+into this repository.
 
 Test counts drift and change; the failure count must be zero. Do not chase a number you remember —
 read the output.

@@ -9,12 +9,18 @@
  * cannot catch that, so this harness lifts the genuine checker out of the shipped
  * bundle and runs it against our own definition.
  *
- * Usage: node tooling/validate-tool-definition.mjs
+ * Usage:
+ *   DSH_TOOLS_BUNDLE=<extracted>/dsh-tools/lib/index.js \
+ *     node tooling/validate-tool-definition.mjs
  */
 
 import { readFileSync } from 'node:fs'
 
-const TOOLS_BUNDLE = 'D:\\DSH\\P5\\refs\\dsh-tools\\lib\\index.js'
+const TOOLS_BUNDLE = process.env.DSH_TOOLS_BUNDLE ?? ''
+if (TOOLS_BUNDLE === '') {
+  console.error('DSH_TOOLS_BUNDLE is not set; point it at the extracted dsh-tools/lib/index.js')
+  process.exit(2)
+}
 
 const source = readFileSync(TOOLS_BUNDLE, 'utf8')
 

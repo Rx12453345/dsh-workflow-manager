@@ -4,7 +4,7 @@
  * For each mutant: apply a literal source edit, run the whole unit suite, record whether the
  * test(s) NEXT-STEPS.md says must catch it went RED, then restore the file byte-for-byte.
  *
- * Usage: node D:/DSH/P5/_b4_mutate.mjs [id ...]
+ * Usage: node tooling/mutation-check.mjs [id ...]
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -78,16 +78,12 @@ const MUTANTS = [
     ],
   },
   {
-    id: 'M6',
-    what: 'addConstraint backdates from candidate.added_at (as specified in NEXT-STEPS)',
-    file: C,
-    find: `    added_at: now.toISOString().slice(0, 10),`,
-    replace: `    added_at: candidate.added_at ?? now.toISOString().slice(0, 10),`,
-    must: ['a confirmed add stamps the framework date, never a caller-supplied one'],
-  },
-  {
+    // M6 ALONE IS MASKED BY THE VALIDATOR. A caller-supplied `added_at` is refused before
+    // `addConstraint` sees it, so the standalone mutation survives without proving a test
+    // hole. M6b removes the masking guard as well and is the meaningful mutation. Keeping
+    // the standalone M6 would make the harness report a false "test gap" forever.
     id: 'M6b',
-    what: 'M6 + the validator stops refusing an unknown added_at (removes the masking guard)',
+    what: 'addConstraint backdates from candidate.added_at + the validator stops refusing it',
     file: C,
     find: `    added_at: now.toISOString().slice(0, 10),`,
     replace: `    added_at: candidate.added_at ?? now.toISOString().slice(0, 10),`,
@@ -144,7 +140,11 @@ const MUTANTS = [
     file: G,
     find: `    if (asked.ok !== true) return { ...asked, action, projectDir }\n\n    const added = addConstraint(`,
     replace: `    if (false) return { ...asked, action, projectDir }\n\n    const added = addConstraint(`,
-    must: ['a declined confirmation writes NOTHING', 'a custom answer is not consent'],
+    must: [
+      'adding without a user-questions service refuses and writes NOTHING',
+      'a declined confirmation writes NOTHING',
+      'a delegated child cannot confirm, and the refusal says what to do instead',
+    ],
   },
   {
     id: 'M11b',
@@ -211,10 +211,7 @@ const MUTANTS = [
     file: C,
     find: `    if (entry.to !== options.phase || entry.from === entry.to) continue`,
     replace: `    if (entry.to !== options.phase) continue`,
-    must: [
-      'a same-phase log line is NOT a phase transition',
-      'the phase counter reads only real history entries, for its phase and its window',
-    ],
+    must: ['a same-phase log line is NOT a phase transition'],
   },
   {
     id: 'M18',

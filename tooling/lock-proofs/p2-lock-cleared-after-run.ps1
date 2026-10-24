@@ -1,6 +1,8 @@
 # P2: the lock is released after a normal run, so a later run succeeds.
 $ErrorActionPreference = 'Stop'
-$root = 'D:\DSH\P5\src-12453345_-dsh-workflow'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$proofDir = Join-Path $env:TEMP 'dsh-workflow-lock-proofs'
+New-Item -ItemType Directory -Force $proofDir | Out-Null
 $lock = Join-Path $root 'tooling\.mutation-lock'
 Remove-Item $lock -Force -ErrorAction SilentlyContinue
 

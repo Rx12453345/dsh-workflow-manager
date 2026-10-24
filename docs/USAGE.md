@@ -274,8 +274,9 @@ than text patterns: text can only be dodged, structure can be checked. See
 - **`file:` dependencies are copies, not symlinks.** After changing code you must sync, then **restart
   DSH and hard-reload the window** (F12 → Network → tick **Disable cache** → F5; `Ctrl+Shift+R` often does
   nothing in Electron).
-- **`simulate-client-scan.mjs` scans the installed copy by default.** To check the workspace copy, pass the
-  path: `node tooling/simulate-client-scan.mjs "D:\DSH\P5\src-12453345_-dsh-workflow"`.
+- **`simulate-client-scan.mjs` scans the current checkout by default.** Set
+  `DSH_CLIENT_MODULES_BUNDLE=<extracted>/dsh-client-modules/lib/index.js` first; the shipped bundle is
+  not vendored here. Pass a different package directory if needed.
 - **The mutation harnesses must never run concurrently** — they rewrite source files, and a shared lock
   now makes the second one fail fast.
 - **`node --check` does not catch scope errors.** One round nearly broke because a module-level helper

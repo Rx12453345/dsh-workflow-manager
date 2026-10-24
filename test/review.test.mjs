@@ -1563,6 +1563,16 @@ test('harness selection follows the depth, not a hardcoded list', () => {
     )
   }
 
+  // The constraints harness has no hyphen after `mutation-check`; discovery must see it,
+  // and its C/G target constants must map to lib/constraints.js and lib/gc.js.
+  for (const file of ['lib/constraints.js', 'lib/gc.js']) {
+    const plan = harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: [file] })
+    assert.ok(
+      plan.required.includes('mutation-check.mjs'),
+      `the constraints harness must cover ${file}; got ${plan.required.join(', ')}`,
+    )
+  }
+
   // No file list: nothing can be selected, and that is REPORTED as a gap rather than as a clean skip.
   const noFiles = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESSES, files: [] })
   assert.deepEqual(noFiles.required, [])

@@ -6,10 +6,12 @@
 # (Start-Process -ArgumentList takes ONE string, so it was mangling argv for the child; a job
 # passes the array verbatim, which is why the holder is started as a job.)
 $ErrorActionPreference = 'Stop'
-$root = 'D:\DSH\P5\src-12453345_-dsh-workflow'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$proofDir = Join-Path $env:TEMP 'dsh-workflow-lock-proofs'
+New-Item -ItemType Directory -Force $proofDir | Out-Null
 $lock = Join-Path $root 'tooling\.mutation-lock'
 $child = Join-Path $root 'tooling\mutation-lock-holder-child.mjs'
-$sink = 'D:\DSH\P5\proofs\out-sink.log'
+$sink = (Join-Path $proofDir 'out-sink.log')
 
 function Run-Node([string[]]$nodeArgs) {
   $p = Start-Process -FilePath node -ArgumentList $nodeArgs -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $sink -RedirectStandardError "$sink.err"

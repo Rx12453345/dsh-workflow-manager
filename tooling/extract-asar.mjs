@@ -1,21 +1,27 @@
 /**
  * Extract named @deepseek-ai packages out of the packaged app.asar.
  *
- * The app ships its plugins inside `D:\DSH\resources\app.asar`; reading the
+ * The app ships its plugins inside `<DSH install>/resources/app.asar`; reading the
  * official implementations is the fastest way to learn an exact contract. This
  * helper is reusable for any package, not just the ones already extracted.
  *
- * Usage: node tooling/extract-asar.mjs <outDir> <pkg> [pkg...]
+ * Usage:
+ *   DSH_APP_ASAR=<DSH install>/resources/app.asar \
+ *     node tooling/extract-asar.mjs <outDir> <pkg> [pkg...]
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
-const ASAR = 'D:\\DSH\\resources\\app.asar'
+const ASAR = process.env.DSH_APP_ASAR ?? ''
 
 const [outDir, ...packages] = process.argv.slice(2)
 if (!outDir || packages.length === 0) {
-  console.error('usage: node extract-asar.mjs <outDir> <pkg> [pkg...]')
+  console.error('usage: DSH_APP_ASAR=<app.asar> node extract-asar.mjs <outDir> <pkg> [pkg...]')
+  process.exit(2)
+}
+if (ASAR === '') {
+  console.error('DSH_APP_ASAR is not set; point it at <DSH install>/resources/app.asar')
   process.exit(2)
 }
 if (!existsSync(ASAR)) {

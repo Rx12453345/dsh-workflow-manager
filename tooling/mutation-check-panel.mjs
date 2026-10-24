@@ -4,7 +4,7 @@
  * For each mutant: apply a literal edit, run the panel's test file, record whether it
  * went RED, restore byte-for-byte and verify the hash.
  *
- * Usage: node D:/DSH/P5/_b6_mutate.mjs [M1 M4 ...]
+ * Usage: node tooling/mutation-check-panel.mjs [M1 M4 ...]
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'

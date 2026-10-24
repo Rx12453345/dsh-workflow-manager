@@ -1,7 +1,9 @@
 # P5: every mutation harness still works SINGLY and reports its normal result.
 # One at a time: each is started, waited for, and its own exit code is read from that process.
 $ErrorActionPreference = 'Stop'
-$root = 'D:\DSH\P5\src-12453345_-dsh-workflow'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$proofDir = Join-Path $env:TEMP 'dsh-workflow-lock-proofs'
+New-Item -ItemType Directory -Force $proofDir | Out-Null
 $lock = Join-Path $root 'tooling\.mutation-lock'
 
 $harnesses = @(
@@ -15,7 +17,7 @@ $harnesses = @(
 
 foreach ($h in $harnesses) {
   Remove-Item $lock -Force -ErrorAction SilentlyContinue
-  $out = "D:\DSH\P5\proofs\harness-$($h.name).log"
+  $out = (Join-Path $proofDir "harness-$($h.name).log")
   $p = Start-Process -FilePath node -ArgumentList (@("tooling/$($h.name)") + $h.args) -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError "$out.err"
   $p.WaitForExit(3600000) | Out-Null
   $lines = Get-Content $out -ErrorAction SilentlyContinue

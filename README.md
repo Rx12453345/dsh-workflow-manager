@@ -38,7 +38,7 @@ The plugin is developed in a workspace, but the DSH profile lives outside it, so
 1. Add the dependency to the profile's `package.json` — **use the directory path, not a tarball**, so code changes need no repackaging:
 
    ```json
-   "src-12453345_-dsh-workflow": "file:D:/DSH/P5/src-12453345_-dsh-workflow"
+   "src-12453345_-dsh-workflow": "file:<absolute-path-to-plugin-checkout>"
    ```
 
 2. Add the package name to the profile's `bundles` array, alongside the other bundles.
@@ -139,14 +139,14 @@ Each document has exactly one job.
 ## Development
 
 ```powershell
-cd D:\DSH\P5\src-12453345_-dsh-workflow
+cd <plugin-checkout>
 
 npm test                                   # the full unit suite; auto-detects the DSH sandbox
 npm run test:sandbox                       # force sandbox mode (environment tests skip with a reason)
 node run-smoke-test.mjs                    # full apply/execute/render chain on a fake ctx
 node run-config-check.mjs                  # patch values vs code defaults
-node tooling/validate-tool-definition.mjs  # run the SHIPPED registry validator on our six definitions
-node tooling/simulate-client-scan.mjs      # will the browser half be discovered?
+$env:DSH_TOOLS_BUNDLE = '<extracted>/dsh-tools/lib/index.js'; node tooling/validate-tool-definition.mjs
+$env:DSH_CLIENT_MODULES_BUNDLE = '<extracted>/dsh-client-modules/lib/index.js'; node tooling/simulate-client-scan.mjs
 ```
 
 Before you consider a change done, read **[CONTRIBUTING.md](CONTRIBUTING.md)**. The short version: a test that cannot be made to go red is not a test, and "the suite is green" has never once been enough to conclude that the plugin works.

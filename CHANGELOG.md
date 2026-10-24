@@ -1,24 +1,20 @@
 # Changelog
 
 All notable changes to this project are documented here.
-This project does not yet follow a tagged release scheme; entries are grouped by the date the work
-landed, and the version line is the one recorded in `package.json`.
+Entries are grouped by the date the work landed; the version line is the one recorded in `package.json`.
 
-Version recorded in `package.json`: **0.1.0** (not a tagged release — `version` has not been bumped for
-any of the work below).
-
-Only two dates are supported by the development journal: **2026-10-11** and **2026-10-12**. Work the
-journal does not date is grouped with the earliest recorded work and says so.
+Version recorded in `package.json`: **0.2.0**.
 
 Deployment is not uniform: a `file:` dependency is a **copy, not a symlink**, so implemented work is not
-live until it has been synced and DSH has been restarted. Every entry below says whether it is deployed.
+live until it has been synced and DSH restarted.
 
 ---
 
-## [Unreleased]
+## [0.2.0] — 2026-10-24
 
-Implemented, tested offline, and **not in the installed copy** at the end of the journal. Until each is
-synced and DSH restarted, the running plugin does not have it.
+The A1–A5 batch, plus the follow-up hardening found by independent review. The final release candidate
+must still be independently reviewed, synced to the plugin roots, and live-verified after a DSH restart;
+the `2eda57e` deployment predates the latest tooling/dry-run changes.
 
 ### Fixed — the A1–A5 bug-fix batch
 
@@ -61,8 +57,10 @@ synced and DSH restarted, the running plugin does not have it.
     a visible reason, so the suite is 518 tests / 511 pass / 7 skip / 0 fail in the sandbox. A normal
     terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
     `tooling/mutation-check.mjs` also normalises CRLF for anchor matching, restores the original
-    Buffer, refreshes its M15 anchor, and exits 3/2/1 on restore/apply/survivor failures. It now
-    honestly reports three pre-existing test gaps (M6 missed, M11/M17 partial) instead of exit 0.
+    Buffer, refreshes its M15 anchor, and exits 3/2/1 on restore/apply/survivor failures. The
+    standalone M6 mutant is removed because the validator masks it (M6b remains the meaningful
+    mutation), and the M11/M17 must-lists now name the assertions that actually catch them. Result:
+    27/27 caught, exit 0.
 - **A4 — the change classifier treated an external project's `.js` as a security surface.** The
     built-in lists describe this plugin's own repository, so every unknown external source failed
     closed. A project can now declare `verification.sources` / `security` / `ui` and explicitly set

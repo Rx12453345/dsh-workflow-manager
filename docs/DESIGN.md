@@ -21,7 +21,7 @@ Every mechanism and its source is tabulated in [References](#references).
 ## 1. Method: read the shipped host, do not guess
 
 Every host fact in this document was read out of the unpacked official plugin bundle rather than
-inferred from behaviour: `D:\DSH\resources\app.asar` was extracted, and the unpacked packages are the
+inferred from behaviour: `<DSH install>\resources\app.asar` was extracted, and the unpacked packages are the
 corpus the design decisions cite. Reading the source is faster than guessing, and it is the only method
 that distinguishes "the host rejects this" from "the host silently ignores this" — a distinction this
 project has repeatedly paid for.
@@ -671,7 +671,7 @@ supplied here; where an item was not read first-hand, that is stated.
 | `refs/dsh-tools/lib/index.js` | `assertSupportedJsonSchema` — the enforced output/parameters subset | Tool definitions |
 | `refs/dsh-app-boot/lib/index.js` | Config-schema projection: the host projects metadata and never executes the schema | The `Config` export rules |
 | `refs/dsh-client-ui-plugin-manager`, `refs/dsh-client-ui-renderer` | The `sidebar.panellist` slot and its fields, the icon as second argument, the `key === entry.id` rule for the `main` slot, and the locale seat rule `if (entry.locale !== undefined) …` | The sidebar panel |
-| `D:\DSH\resources\app.asar` | The official plugin packages, unpacked | The corpus for all of the above |
+| `<DSH install>\resources\app.asar` | The official plugin packages, unpacked | The corpus for all of the above |
 
 **Provenance note, preserved from the original:** items not read first-hand are marked as such — the
 OpenAI original was unavailable (403) and its technical detail comes from Fowler's discussion and a video

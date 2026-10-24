@@ -21,14 +21,20 @@
  * when it describes the settings document — an injected assignment is too late and
  * makes the row disappear from the settings namespace directory (part 4).
  *
- *   cd C:\Users\dengh\.dsh\profiles\desktop
- *   node D:\DSH\P5\src-12453345_-dsh-workflow\tooling\check-config-schema.mjs
+ *   cd "$DSH_PROFILE_DIR"        # default: ~/.dsh/profiles/desktop
+ *   node "<plugin-checkout>/tooling/check-config-schema.mjs"
+ *
+ * The profile can be overridden with DSH_PROFILE_DIR; the package root is derived
+ * from this script's own location, so the checkout can live anywhere.
  */
 
 import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const PACKAGE_DIR = 'D:/DSH/P5/src-12453345_-dsh-workflow'
-const PROFILE_DIR = 'C:/Users/dengh/.dsh/profiles/desktop'
+const PACKAGE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const PROFILE_DIR = process.env.DSH_PROFILE_DIR ?? join(homedir(), '.dsh', 'profiles', 'desktop')
 
 async function loadSchemastery() {
   try {
@@ -37,9 +43,9 @@ async function loadSchemastery() {
     return mod.default ?? mod
   } catch {
     try {
-      const require = createRequire(`${PROFILE_DIR}/`)
+      const require = createRequire(pathToFileURL(join(PROFILE_DIR, 'package.json')))
       const path = require.resolve('@deepseek-ai/schemastery')
-      const mod = await import(`file:///${path.replace(/\\/g, '/')}`)
+      const mod = await import(pathToFileURL(path).href)
       console.log('schemastery: resolved via the profile')
       return mod.default ?? mod
     } catch (error) {
@@ -54,8 +60,8 @@ async function loadSchemastery() {
 }
 
 const z = await loadSchemastery()
-const { buildConfigSchema } = await import(`file:///${PACKAGE_DIR}/lib/config-schema.js`)
-const { DEFAULT_CONFIG, resolveConfig } = await import(`file:///${PACKAGE_DIR}/lib/config.js`)
+const { buildConfigSchema } = await import(pathToFileURL(join(PACKAGE_DIR, 'lib', 'config-schema.js')).href)
+const { DEFAULT_CONFIG, resolveConfig } = await import(pathToFileURL(join(PACKAGE_DIR, 'lib', 'config.js')).href)
 
 let failed = false
 function check(label, condition, detail = '') {
@@ -147,7 +153,7 @@ check(
 // callback is too late, the row is dropped from the namespace directory, and the
 // browser page silently never appears.
 console.log('\nthe exported Config (what the host reads):')
-const entry = await import(`file:///${PACKAGE_DIR}/lib/index.js`)
+const entry = await import(pathToFileURL(join(PACKAGE_DIR, 'lib', 'index.js')).href)
 check(
   'the host entry imports',
   typeof entry.apply === 'function',

@@ -9,8 +9,13 @@
  * Usage: node tooling/check-installed-config.mjs
  */
 
-const INSTALLED =
-  'file:///C:/Users/dengh/.dsh/profiles/desktop/node_modules/src-12453345_-dsh-workflow/lib/index.js'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+
+const PROFILE_DIR = process.env.DSH_PROFILE_DIR ?? join(homedir(), '.dsh', 'profiles', 'desktop')
+const PACKAGE_DIR = join(PROFILE_DIR, 'node_modules', 'src-12453345_-dsh-workflow')
+const INSTALLED = pathToFileURL(join(PACKAGE_DIR, 'lib', 'index.js')).href
 
 /** The host's own predicate, copied from dsh-app-boot `isNativeConfigSchema`. */
 function isNativeConfigSchema(value) {
@@ -38,8 +43,8 @@ const dict = Reflect.get(Config ?? {}, 'dict') ?? {}
 // component entry that forgets to re-export `Config` is silently dropped from the
 // settings namespace directory — the browser page then never receives a form.
 const SUBENTRIES = [
-  ['core', 'C:/Users/dengh/.dsh/profiles/desktop/node_modules/src-12453345_-dsh-workflow/lib/components/core/index.js'],
-  ['panel', 'C:/Users/dengh/.dsh/profiles/desktop/node_modules/src-12453345_-dsh-workflow/lib/components/panel/index.js'],
+  ['core', join(PACKAGE_DIR, 'lib', 'components', 'core', 'index.js')],
+  ['panel', join(PACKAGE_DIR, 'lib', 'components', 'panel', 'index.js')],
 ]
 
 const checks = [
@@ -56,7 +61,7 @@ const checks = [
 ]
 
 for (const [label, path] of SUBENTRIES) {
-  const sub = await import(`file:///${path}`)
+  const sub = await import(pathToFileURL(path).href)
   checks.push(
     [`the /${label} entry re-exports Config`, sub.Config !== undefined],
     [`the host would accept the /${label} Config`, hostAccepts(sub.Config)],

@@ -2,20 +2,24 @@
 //
 // WHY THIS EXISTS: the profile declares the plugin as a `file:` dependency and the
 // loader still materialises a COPY rather than a symlink, so editing
-// `D:\DSH\P5\src-12453345_-dsh-workflow` has NO effect until the files are copied
-// across and DSH is restarted. Forgetting this step produces the worst kind of
-// bug report: "I fixed it and nothing changed".
+// a checkout has NO effect until the files are copied across and DSH is restarted.
+// Forgetting this step produces the worst kind of bug report: "I fixed it and
+// nothing changed".
 //
 // Usage:  node sync-to-profile.mjs [--check]
-//   (default) copy workspace -> profile
+//   (default) copy this checkout -> the profile's installed copy
 //   --check   report differences without writing
+//   DSH_WORKFLOW_SRC / DSH_PROFILE_DIR override the two roots.
 
 import { cp, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { homedir } from 'node:os'
+import { dirname, join, relative, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const SRC = 'D:/DSH/P5/src-12453345_-dsh-workflow'
-const DST = 'C:/Users/dengh/.dsh/profiles/desktop/node_modules/src-12453345_-dsh-workflow'
+const SRC = process.env.DSH_WORKFLOW_SRC ?? resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const PROFILE_DIR = process.env.DSH_PROFILE_DIR ?? join(homedir(), '.dsh', 'profiles', 'desktop')
+const DST = join(PROFILE_DIR, 'node_modules', 'src-12453345_-dsh-workflow')
 
 /** Everything the runtime needs; tooling/test files stay workspace-only. */
 const INCLUDE = ['lib', 'package.json', 'cordis.patch.yml', 'README.md']

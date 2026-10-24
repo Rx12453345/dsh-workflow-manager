@@ -6,18 +6,21 @@
  * runs the SHIPPED `resolveMeta` logic against the real installed files and reports
  * exactly where discovery would stop.
  *
- * Usage: node tooling/simulate-client-scan.mjs [packageDir]
+ * Usage:
+ *   DSH_CLIENT_MODULES_BUNDLE=<extracted>/dsh-client-modules/lib/index.js \
+ *     node tooling/simulate-client-scan.mjs [packageDir]
  */
 
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
-const pkgDir = resolve(
-  process.argv[2] ??
-    'C:\\Users\\dengh\\.dsh\\profiles\\desktop\\node_modules\\src-12453345_-dsh-workflow',
-)
+const pkgDir = resolve(process.argv[2] ?? process.cwd())
 
-const BUNDLE = 'D:\\DSH\\P5\\refs\\dsh-client-modules\\lib\\index.js'
+const BUNDLE = process.env.DSH_CLIENT_MODULES_BUNDLE ?? ''
+if (BUNDLE === '') {
+  console.error('DSH_CLIENT_MODULES_BUNDLE is not set; point it at the extracted dsh-client-modules/lib/index.js')
+  process.exit(2)
+}
 const source = readFileSync(BUNDLE, 'utf8')
 
 /**

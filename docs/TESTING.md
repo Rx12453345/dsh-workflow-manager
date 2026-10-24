@@ -4,7 +4,7 @@ The six verification layers, ordered **from cheapest to most expensive**. Each l
 catch and — more importantly — **what it cannot**. This document exists because several rounds in this
 project's history had "the suite is green" and "it actually works" as two different things.
 
-Working directory throughout: `D:\DSH\P5\src-12453345_-dsh-workflow` (referred to below as `<plugin>`).
+Working directory throughout: `<plugin-checkout>` (referred to below as `<plugin>`).
 What must run before a change is considered done is [CONTRIBUTING.md](../CONTRIBUTING.md); the traps each
 layer guards against are in [PITFALLS.md](PITFALLS.md).
 
@@ -132,12 +132,15 @@ cd <plugin>
 node run-unit-tests.mjs                       # expect: 518 tests, 517 pass, 0 fail, 1 skipped
 node run-smoke-test.mjs                       # expect "smoke test passed"
 node run-config-check.mjs                     # expect 2 OK lines
-node tooling/validate-tool-definition.mjs     # expect "all 6 tool definitions are acceptable"
-node tooling/check-config-schema.mjs          # schemastery semantics
+$env:DSH_TOOLS_BUNDLE = '<extracted>/dsh-tools/lib/index.js'; node tooling/validate-tool-definition.mjs
+node tooling/check-config-schema.mjs          # schemastery semantics (resolves from the profile)
 node tooling/check-installed-config.mjs       # the installed copy is visible to the host
-node tooling/simulate-client-scan.mjs         # the browser half is discoverable
+$env:DSH_CLIENT_MODULES_BUNDLE = '<extracted>/dsh-client-modules/lib/index.js'; node tooling/simulate-client-scan.mjs
 node tooling/sync-to-profile.mjs --check      # expect 0 differ
 ```
+
+`DSH_PROFILE_DIR` overrides the profile (default `~/.dsh/profiles/desktop`). The two shipped-bundle
+tools require the extracted host packages, because those bundles are not vendored here.
 
 The current **518 / 517 pass / 0 fail / 1 skipped** is the real figure measured from this repository in a
 normal terminal. In the DSH sandbox the runner sets `DSH_WORKFLOW_SANDBOX=1`, so six environment-dependent

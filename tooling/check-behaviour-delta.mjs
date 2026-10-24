@@ -71,13 +71,14 @@
  */
 
 import { existsSync, mkdtempSync, mkdirSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const WORKSPACE_MODULE = join(dirname(fileURLToPath(import.meta.url)), '..', 'lib', 'approval.js')
+const PROFILE_DIR = process.env.DSH_PROFILE_DIR ?? join(homedir(), '.dsh', 'profiles', 'desktop')
 const INSTALLED_MODULE =
-  process.argv[2] ?? 'C:/Users/dengh/.dsh/profiles/desktop/node_modules/src-12453345_-dsh-workflow/lib/approval.js'
+  process.argv[2] ?? join(PROFILE_DIR, 'node_modules', 'src-12453345_-dsh-workflow', 'lib', 'approval.js')
 
 /**
  * The shape of one verdict, reduced to the two things this check cares about.

@@ -1,7 +1,9 @@
 # P3: a stale lock (dead pid / old timestamp) is recovered, and the take-over says so.
 $ErrorActionPreference = 'Stop'
-$root = 'D:\DSH\P5\src-12453345_-dsh-workflow'
-$workspace = 'D:\DSH\P5'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$proofDir = Join-Path $env:TEMP 'dsh-workflow-lock-proofs'
+New-Item -ItemType Directory -Force $proofDir | Out-Null
+$workspace = Split-Path $root -Parent
 $lock = Join-Path $root 'tooling\.mutation-lock'
 Remove-Item $lock -Force -ErrorAction SilentlyContinue
 Push-Location $root

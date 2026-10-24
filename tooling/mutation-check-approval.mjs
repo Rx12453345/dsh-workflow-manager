@@ -4,7 +4,7 @@
  * For each mutant: apply a literal source edit, run the suite that is supposed to catch
  * it, record whether it went RED, then restore the file byte-for-byte.
  *
- * Usage: node D:/DSH/P5/.mutate.mjs
+ * Usage: node tooling/mutation-check-approval.mjs
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'

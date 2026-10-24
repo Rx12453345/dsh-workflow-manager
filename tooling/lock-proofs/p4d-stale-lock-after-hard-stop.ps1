@@ -5,10 +5,12 @@
 # the handle Start-Process returned for it. It never selects a process by name, image, age or
 # any other heuristic, and it touches no process it did not start.
 $ErrorActionPreference = 'Stop'
-$root = 'D:\DSH\P5\src-12453345_-dsh-workflow'
+$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$proofDir = Join-Path $env:TEMP 'dsh-workflow-lock-proofs'
+New-Item -ItemType Directory -Force $proofDir | Out-Null
 $lock = Join-Path $root 'tooling\.mutation-lock'
-$victimSink = 'D:\DSH\P5\proofs\out-victim.log'
-$nextSink = 'D:\DSH\P5\proofs\out-next.log'
+$victimSink = (Join-Path $proofDir 'out-victim.log')
+$nextSink = (Join-Path $proofDir 'out-next.log')
 Remove-Item $lock -Force -ErrorAction SilentlyContinue
 
 $victim = Start-Process -FilePath node -ArgumentList 'tooling/mutation-check-work-unit.mjs' -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $victimSink -RedirectStandardError "$victimSink.err"
