@@ -13,8 +13,10 @@ live until it has been synced and DSH restarted.
 ## [0.2.0] — 2026-10-24
 
 The A1–A5 batch, plus the follow-up hardening found by independent review. The final release candidate
-must still be independently reviewed, synced to the plugin roots, and live-verified after a DSH restart;
-the `2eda57e` deployment predates the latest tooling/dry-run changes.
+was independently reviewed (security class, PASS 8.86), synced byte-for-byte to both plugin roots, and
+live-verified after a DSH restart: `workflow_status` reports `startActivation=yes`, and a delegated
+child's gate-weakening write was refused automatically and left the probe file unchanged. This paragraph
+was corrected by a docs-only follow-up after deployment; no code changed.
 
 ### Fixed — the A1–A5 bug-fix batch
 
