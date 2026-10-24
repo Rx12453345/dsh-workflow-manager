@@ -129,7 +129,7 @@ Runs in seconds. Run it after **every** change.
 
 ```powershell
 cd <plugin>
-node run-unit-tests.mjs                       # expect: 517 tests, 516 pass, 0 fail, 1 skipped
+node run-unit-tests.mjs                       # expect: 518 tests, 517 pass, 0 fail, 1 skipped
 node run-smoke-test.mjs                       # expect "smoke test passed"
 node run-config-check.mjs                     # expect 2 OK lines
 node tooling/validate-tool-definition.mjs     # expect "all 6 tool definitions are acceptable"
@@ -139,9 +139,9 @@ node tooling/simulate-client-scan.mjs         # the browser half is discoverable
 node tooling/sync-to-profile.mjs --check      # expect 0 differ
 ```
 
-The current **517 / 516 pass / 0 fail / 1 skipped** is the real figure measured from this repository in a
+The current **518 / 517 pass / 0 fail / 1 skipped** is the real figure measured from this repository in a
 normal terminal. In the DSH sandbox the runner sets `DSH_WORKFLOW_SANDBOX=1`, so six environment-dependent
-tests skip as well: **517 tests / 510 pass / 0 fail / 7 skipped**. The single non-sandbox skip is a Windows
+tests skip as well: **518 tests / 511 pass / 0 fail / 7 skipped**. The single non-sandbox skip is a Windows
 limitation (the platform has no catchable `SIGTERM`), not a failing case. Test counts drift as work lands;
 **the failure count is the number that must be zero.**
 

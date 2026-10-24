@@ -51,13 +51,18 @@ synced and DSH restarted, the running plugin does not have it.
     verification section is now confirmable, not only a delta the writer models; the delta for a
     non-approval write is measured against the file, so confirming a verification change cannot clear
     the approval memory and legitimise an earlier direct edit. `workflow_status` reports
-    `DOWNGRADE IGNORED` / `OPT-IN FILE MISSING`. The decision to
-    make it strict was the user's: the agent cannot change the gate on its own.
+    `DOWNGRADE IGNORED` / `OPT-IN FILE MISSING`. A `dry_run` of a gate-setting write now validates
+    and reports without asking or writing, and the report still records that the real write would
+    require confirmation. The decision to make it strict was the user's: the agent cannot change the
+    gate on its own.
 - **A3 — the test runner was blocked by the DSH sandbox.** `npm test` now runs `run-unit-tests.mjs`,
     which detects the sandbox's piped-child `EPERM` and sets `DSH_WORKFLOW_SANDBOX=1`; the six
     environment-dependent tests (five mutation-lock races and the Chromium layout measurement) skip with
-    a visible reason, so the suite is 517 tests / 510 pass / 7 skip / 0 fail in the sandbox. A normal
+    a visible reason, so the suite is 518 tests / 511 pass / 7 skip / 0 fail in the sandbox. A normal
     terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
+    `tooling/mutation-check.mjs` also normalises CRLF for anchor matching, restores the original
+    Buffer, refreshes its M15 anchor, and exits 3/2/1 on restore/apply/survivor failures. It now
+    honestly reports three pre-existing test gaps (M6 missed, M11/M17 partial) instead of exit 0.
 - **A4 — the change classifier treated an external project's `.js` as a security surface.** The
     built-in lists describe this plugin's own repository, so every unknown external source failed
     closed. A project can now declare `verification.sources` / `security` / `ui` and explicitly set

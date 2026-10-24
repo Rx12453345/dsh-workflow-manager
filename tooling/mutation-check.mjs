@@ -186,8 +186,8 @@ const MUTANTS = [
     id: 'M15',
     what: 'renderConstraint drops the FREE TEXT marker',
     file: G,
-    find: '    out.push(`${depth}    signal (FREE TEXT — the framework did NOT evaluate this): ${asText(item.signal)}`)',
-    replace: '    out.push(`${depth}    signal: ${asText(item.signal)}`)',
+    find: '    out.push(`${depth}    signal (FREE TEXT — the framework did NOT evaluate this): ${oneLine(item.signal)}`)',
+    replace: '    out.push(`${depth}    signal: ${oneLine(item.signal)}`)',
     must: ['scan separates provably due from due-for-human-review and claims nothing about the signal'],
   },
   {
@@ -331,7 +331,9 @@ function failingTests(output) {
 async function main() {
   const originals = new Map()
   const restoreAll = () => {
-    for (const [file, text] of originals) writeFileSync(`${ROOT}/${file}`, text, 'utf8')
+    // Buffers, not strings: a CRLF checkout must come back byte-for-byte, not merely
+    // line-ending-normalised.
+    for (const [file, buffer] of originals) writeFileSync(`${ROOT}/${file}`, buffer)
   }
   // try/finally covers a thrown suite, but NOT a signal: Node's default SIGINT handler exits
   // without unwinding. Restore explicitly before dying, so a Ctrl-C cannot leave a mutant behind.
@@ -348,16 +350,19 @@ async function main() {
   await withMutationLock(
     async () => {
       console.log(`${LABEL}: mutation lock acquired`)
-      for (const file of new Set(MUTANTS.map(m => m.file))) originals.set(file, readFileSync(`${ROOT}/${file}`, 'utf8'))
+      for (const file of new Set(MUTANTS.map(m => m.file))) originals.set(file, readFileSync(`${ROOT}/${file}`))
 
-      const beforeHashes = new Map([...originals].map(([file, text]) => [file, sha(text)]))
+      const beforeHashes = new Map([...originals].map(([file, buffer]) => [file, sha(buffer)]))
       const rows = []
 
       for (const mutant of MUTANTS) {
         if (only.size > 0 && !only.has(mutant.id)) continue
-        const original = originals.get(mutant.file)
+        const originalBuffer = originals.get(mutant.file)
+        const original = originalBuffer.toString('utf8')
+        // Anchors are written with LF; a CRLF checkout must still apply the mutant.
+        const normalised = original.replace(/\r\n/g, '\n')
         const edits = [{ find: mutant.find, replace: mutant.replace }, ...(mutant.extra ? (Array.isArray(mutant.extra) ? mutant.extra : [mutant.extra]) : [])]
-        let text = original
+        let text = normalised
         const problems = []
         for (const edit of edits) {
           const occurrences = text.split(edit.find).length - 1
@@ -380,7 +385,7 @@ async function main() {
           writeFileSync(`${ROOT}/${mutant.file}`, text, 'utf8')
           run = runSuite()
         } finally {
-          writeFileSync(`${ROOT}/${mutant.file}`, original, 'utf8')
+          writeFileSync(`${ROOT}/${mutant.file}`, originalBuffer)
         }
 
         if (run.error) {
@@ -403,9 +408,9 @@ async function main() {
 
       // Restore check: every file must be byte-identical to the snapshot taken before the run.
       let restored = true
-      for (const [file, text] of originals) {
-        const now = readFileSync(`${ROOT}/${file}`, 'utf8')
-        if (now !== text) restored = false
+      for (const [file, originalBuffer] of originals) {
+        const now = readFileSync(`${ROOT}/${file}`)
+        if (!now.equals(originalBuffer)) restored = false
         if (sha(now) !== beforeHashes.get(file)) restored = false
       }
 
@@ -428,6 +433,11 @@ async function main() {
       console.log(`\nsource restored byte-for-byte: ${restored ? 'YES' : 'NO — INVESTIGATE'}`)
       const summary = { caught: rows.filter(r => r.caught).length, partial: rows.filter(r => r.applied && !r.error && r.red && !r.caught).length, missed: rows.filter(r => r.applied && !r.error && !r.red).length, failed: rows.filter(r => !r.applied || r.error).length }
       console.log(`totals: caught=${summary.caught} partial=${summary.partial} missed=${summary.missed} not-applied/errored=${summary.failed}`)
+      // A HARNESS THAT CANNOT FAIL IS NOT A CHECK. Restore failure is worst, then an
+      // unapplied/errored mutant, then a survivor or a mutant caught only partially.
+      if (!restored) process.exitCode = 3
+      else if (summary.failed > 0) process.exitCode = 2
+      else if (summary.partial > 0 || summary.missed > 0) process.exitCode = 1
     },
     { label: LABEL },
   )

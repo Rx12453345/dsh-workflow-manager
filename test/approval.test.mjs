@@ -52,6 +52,7 @@ import {
   collectPathArguments,
   readPromptChannel,
   unanswerablePromptReason,
+  isGateConfigurationWrite,
 } from '../lib/approval.js'
 import { resolveApprovalState, clearApprovalStateCache } from '../lib/approval-state.js'
 import { applyCore } from '../lib/index.js'
@@ -2606,6 +2607,52 @@ test('a confirmation for one verification axis does not clear the approval memor
     // The verification write happened, but the approval axis must still be the gate the
     // session stored, not the value written directly to the file.
     assert.equal(resolveApprovalState(exec, {}, { defaults: DEFAULTS }).gate.strength, 'ask-user')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
+})
+
+test('a dry run of a gate-setting write validates without confirmation or a write', async () => {
+  const dir = makeProject('tier: standard\n')
+  try {
+    const exec = makeExec({ cwd: dir })
+    const before = readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8')
+    const direct = runSet({
+      exec,
+      config: resolveConfig({}),
+      path: 'approval.strength',
+      value: 'llm-only',
+      hasValue: true,
+      dryRun: true,
+    })
+    assert.equal(direct.ok, true, JSON.stringify(direct).slice(0, 300))
+    assert.equal(direct.dryRun, true)
+    assert.equal(direct.changed, true)
+    assert.equal(direct.confirmationRequired, true, 'the real write still needs confirmation')
+    assert.equal(readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'), before)
+
+    // The tool wrapper must not even attempt to ask: a dry run writes nothing.
+    const tool = buildSetToolDefinition({
+      config: resolveConfig({}),
+      getUserQuestions: () => {
+        throw new Error('a dry run must not ask for confirmation')
+      },
+    })
+    const result = await tool.execute(
+      { path: 'approval.strength', value: 'llm-only', dry_run: true },
+      exec,
+    )
+    assert.equal(result.ok, true, JSON.stringify(result).slice(0, 300))
+    assert.equal(result.dryRun, true)
+    assert.equal(result.confirmationRequired, true)
+    assert.equal(readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'), before)
+
+    // The pre-execute classifier also treats a dry run as non-writing.
+    assert.equal(
+      isGateConfigurationWrite({ path: 'approval.strength', value: 'llm-only', dry_run: true }),
+      false,
+    )
   } finally {
     rmSync(dir, { recursive: true, force: true })
     clearApprovalStateCache()
