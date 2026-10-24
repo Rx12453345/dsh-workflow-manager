@@ -48,6 +48,7 @@ import {
   probeServices,
 } from '../lib/tools.js'
 import { buildGcToolDefinition } from '../lib/gc.js'
+import { renderWorkflowGuidance } from '../lib/index.js'
 import { configWarnings, resolveConfig, DEFAULT_CONFIG, MAX_SUBAGENT_DEPTH, APPROVAL_STRENGTHS, RISK_LEVELS } from '../lib/config.js'
 import { probeProject, parseWorkflowYaml } from '../lib/project.js'
 import { checkBar, checkMaxRounds, readEvaluatorGate, BAR_MIN, BAR_MAX } from '../lib/gate.js'
@@ -330,6 +331,57 @@ test('other section writes still have to be objects', () => {
     assert.ok(validateSettingValue([section], 'nope'), `${section} accepted a string`)
     assert.ok(validateSettingValue([section], 7), `${section} accepted a number`)
   }
+})
+
+test('an unreadable project file is refused by both writers, not dereferenced', () => {
+  const dir = makeProject(undefined)
+  try {
+    mkdirSync(join(dir, '.dsh', 'workflow.yml'), { recursive: true })
+    const exec = execFor(dir)
+    const set = runSet({
+      exec,
+      config: resolveConfig({}),
+      path: 'tier',
+      value: 'strict',
+      hasValue: true,
+    })
+    assert.equal(set.status, 'unreadable-project-file')
+    assert.equal(set.ok, false)
+
+    const init = runInit({ exec, config: resolveConfig({}), requested: { tier: 'strict' } })
+    assert.equal(init.status, 'unreadable-project-file')
+    assert.equal(init.ok, false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the static guidance does not assert a project policy it never read', () => {
+  const text = renderWorkflowGuidance(resolveConfig({}))
+  assert.doesNotMatch(text, /This project has verification\.policy=off/)
+  assert.match(text, /PROJECT-SCOPED/)
+})
+
+test('the verification writer refuses every value its reader refuses', () => {
+  const refused = [
+    [['verification', 'policy'], 'banana'],
+    [['verification', 'confirmation'], 'banana'],
+    [['verification', 'report'], 'yes'],
+    [['verification', 'allowUnknownSources'], 'yes'],
+    [['verification', 'sources'], ['../bad']],
+    [['verification'], { policy: 'banana' }],
+    [['verification'], { unknownKey: true }],
+  ]
+  for (const [segments, value] of refused) {
+    assert.ok(validateSettingValue(segments, value), `${segments.join('.')} accepted ${JSON.stringify(value)}`)
+  }
+  assert.equal(validateSettingValue(['verification', 'policy'], 'advisory'), null)
+  assert.equal(validateSettingValue(['verification', 'confirmation'], 'never'), null)
+  assert.equal(
+    validateSettingValue(['verification'], { policy: 'off', sources: ['lib'], ui: ['lib/client.js'] }),
+    null,
+  )
+  assert.equal(validateSettingValue(['verification'], null), null)
 })
 
 test('the whole-section bypass is closed end to end', () => {

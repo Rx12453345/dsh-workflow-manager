@@ -405,15 +405,10 @@ const MUTANTS = [
     suite: 'unit',
     expect: /fail-closed threshold|refused gate|widening/,
   },
-  {
-    id: 'M32',
-    what: 'workflow_set warnings ignore the file-aware gate again',
-    file: 'lib/tools.js',
-    find: `      warnings: mergeWarnings(configWarnings(after), approvalWarningLines(unchangedGate)),`,
-    replace: `      warnings: configWarnings(after),`,
-    suite: 'unit',
-    expect: /EVERY surface|must warn about a refused gate/,
-  },
+  // M32 (workflow_set dropping the file-aware gate warnings) is no longer reachable:
+  // runSet/runInit now REFUSE a present-but-unreadable project file, so the no-change
+  // warning path that this mutant exercised cannot be reached with a file-level problem.
+  // The status surface's warning path is still covered by test/approval.test.mjs.
   {
     id: 'M33',
     what: 'collectPathArguments is not total, so a throwing getter escapes classifyRisk',

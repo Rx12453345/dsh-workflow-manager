@@ -1587,6 +1587,23 @@ test('harness selection follows the depth, not a hardcoded list', () => {
   }
 })
 
+test('an unreadable harness table is carried into the audit, not read as "no coverage"', () => {
+  const plan = harnessesForDepth({
+    depth: VERIFICATION_DEPTHS.INDEPENDENT,
+    files: ['lib/approval.js'],
+    tooling: join(tmpdir(), 'dsh-wf-definitely-absent'),
+  })
+  assert.equal(plan.unreadable, true)
+  assert.match(plan.note, /could not be read|missing/i)
+  const resolution = resolveVerificationDepth({
+    declaredClass: 'security',
+    changedFiles: ['lib/approval.js'],
+  })
+  const audit = buildVerificationAudit(resolution, { policy: 'advisory', harnesses: plan })
+  assert.equal(audit.harnessUnreadable, true)
+  assert.match(renderVerificationAudit(audit).join('\n'), /UNREADABLE/)
+})
+
 test('an unreadable harness directory is reported as a gap, not as "no coverage"', () => {
   // THE DIFFERENCE THAT MATTERS. "No harness covers these files" is a statement about the
   // repository and is a reason to move on; "the harnesses could not be read" is a statement about

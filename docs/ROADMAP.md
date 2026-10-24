@@ -18,7 +18,7 @@ Each line names the evidence, not an assurance.
 | Item | Evidence |
 |---|---|
 | Six tools register, and the shipped registry validator accepts all six definitions | `DSH_TOOLS_BUNDLE=<extracted>/dsh-tools/lib/index.js node tooling/validate-tool-definition.mjs` → `all 6 tool definitions are acceptable to the shipped registry`, exit 0 (NEXT-STEPS.md:1972, 2440) |
-| The offline unit suite | `node run-unit-tests.mjs` → **518 tests / 517 pass / 0 fail / 1 skip**; the skip is a Windows-only limitation (no catchable `SIGTERM`), not a failing case. In the DSH sandbox the same suite is 518 / 511 pass / 7 skip (six environment-gated cases). |
+| The offline unit suite | `node run-unit-tests.mjs` → **522 tests / 521 pass / 0 fail / 1 skip**; the skip is a Windows-only limitation (no catchable `SIGTERM`), not a failing case. In the DSH sandbox the same suite is 522 / 515 pass / 7 skip (six environment-gated cases). |
 | The full apply/execute/render chain on a fake ctx | `node run-smoke-test.mjs` → `smoke test passed` (NEXT-STEPS.md:1970) |
 | Patch values match code defaults | `node run-config-check.mjs` → `OK: every patch value matches its code default`; `resolved maxDepth is 2` (NEXT-STEPS.md:3155) |
 | The browser half is discoverable | `DSH_CLIENT_MODULES_BUNDLE=<extracted>/dsh-client-modules/lib/index.js node tooling/simulate-client-scan.mjs` STEP 1–5 OK (NEXT-STEPS.md:3154) |
@@ -26,12 +26,12 @@ Each line names the evidence, not an assurance.
 | Reverse self-certification | Real host: with no review this session, `record-review` is refused with **"a claim that one passed is not evidence"** (TESTING.md:331) |
 | Review fingerprinting | Unit tests; mutation turns 2 tests red; real `FEATURES.json` carries `evidence[].fingerprint` (NEXT-STEPS.md:1392, 1409–1415) |
 | Independent review round-trip, delegation depth, and main-context isolation | Real host: a depth-1 child created a depth-2 reviewer with no `SubagentDepthError`, and the full round-trip returned to the main conversation as a summary only (NEXT-STEPS.md:1403–1407) |
-| The approval gate's decisions, messages and probe | Real host: `APPROVAL NOT SATISFIABLE HERE — this session's approval policy is "never" …`; `test/approval.test.mjs` 83 assertions; `mutation-check-approval.mjs` 61/61 caught (TESTING.md:329; NEXT-STEPS.md:2605) |
+| The approval gate's decisions, messages and probe | Real host: `APPROVAL NOT SATISFIABLE HERE — this session's approval policy is "never" …`; `test/approval.test.mjs` covers the incident replay; `mutation-check-approval.mjs` 65/65 active mutants caught (M32 removed as unreachable; TESTING.md:329; NEXT-STEPS.md:2605) |
 | Constraint ledger: scan, validation, `dry_run`, the refuse-to-write without confirmation path, and retirement as a mark rather than a delete | Real host: `not-confirmed` returned for an unconfirmed add; a **typed** answer was correctly judged not consent; a confirmed `C001` write recorded `confirmed_by: "user-question"` (TESTING.md:334–342) |
 | The GC never claims to have evaluated a free-text signal | Real host: `workflow_gc scan` on a real constraint judged `not-due` **and explicitly stated that the framework did not evaluate that free-text signal**, and that this is not a claim the signal is unmet (TESTING.md:342) |
 | Work-unit isolation | Real host: `.dsh/WORKFLOW.json` (PICK) and `.dsh/work/B4/WORKFLOW.json` (PLAN) coexist; `work units (1): B4@PLAN`; `../evil` refused with an explanation of why refusal beats sanitisation (TESTING.md:332–333) |
 | The mutation lock | An in-run second mutator exits **2 within 0.1 s** naming the holder with the source hash unchanged; a killed run's lock is taken over by the next run; the lock probe's L1–L4 mutants are all RED (NEXT-STEPS.md:2888–2896, 3007–3015) |
-| The self-deployment exemption (offline) | `test/approval.test.mjs` 72 → 83; `mutation-check-approval.mjs` 46 → 61 mutants, 61/61 caught; independent review round 1 PASS 8.71 with 1306 differential cases and 0 unexplained differences (NEXT-STEPS.md:2605, 2762–2766) |
+| The self-deployment exemption (offline) | `test/approval.test.mjs` covers the exemption; `mutation-check-approval.mjs` 46 → 65 active mutants, 65/65 caught (M32 removed as unreachable); independent review round 1 PASS 8.71 with 1306 differential cases and 0 unexplained differences (NEXT-STEPS.md:2605, 2762–2766) |
 | Risk-graded verification depth (offline) | V01–V27 all KILLED, `sources restored byte-for-byte: YES` (NEXT-STEPS.md:132–168) |
 
 **Deployment state is not uniform.** Items are separately deployed; see CHANGELOG.md, which marks each

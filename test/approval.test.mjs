@@ -1266,7 +1266,7 @@ test('the writer refuses every approval value the gate refuses', () => {
 // the fallback must be narrowest on every axis, and nothing may throw
 // ---------------------------------------------------------------------------
 
-test('workflow_status and workflow_set report the gate the RUNTIME will use, not the one the file wrote', () => {
+test('workflow_status reports the runtime gate; workflow_set refuses a present-but-unreadable file', () => {
   // The defect this pins: the listener refused a project file with parse problems and ran
   // the fail-closed defaults, while `workflow_status` / `workflow_set` re-derived the
   // merged section and reported the strength the project had written. The two answers
@@ -1294,12 +1294,11 @@ test('workflow_status and workflow_set report the gate the RUNTIME will use, not
     assert.ok(status.effectiveConfig.approval.problems.length > 0)
     assert.match(renderStatus(status), /APPROVAL GATE BROKEN/)
 
+    // A present-but-unparseable file is refused by the writer rather than dereferenced.
+    // The status surface above still reports the fail-closed gate the runtime uses.
     const read = runSet({ exec: makeExec({ cwd: dir }), config: {}, path: 'approval.strength' })
-    assert.equal(read.ok, true)
-    assert.equal(read.value, runtime.gate.strength, 'a read must not report "off" for a gate that runs ask-user')
-    assert.equal(read.projectOverride, 'off', 'the raw file value is still reported separately')
-    assert.equal(read.approvalUsable, false)
-    assert.ok(read.approvalNote)
+    assert.equal(read.ok, false)
+    assert.equal(read.status, 'unreadable-project-file')
   } finally {
     rmSync(dir, { recursive: true, force: true })
     clearApprovalStateCache()
@@ -1427,7 +1426,10 @@ test('a refused gate is reported and warned about by EVERY surface, including wo
   // see a file-level parse problem, so `workflow_status` printed the verbatim warning while
   // `workflow_set` printed nothing. The warnings now come from the file-aware gate as well.
   clearApprovalStateCache()
-  const dir = makeProject('approval:\n  strength: ask-user\ntier: standard\noops not yaml\n')
+  // A malformed approval SECTION that still parses as YAML. The previous fixture also made
+  // the whole project file unparseable, which the writers now refuse outright; keep this
+  // test about the warning surfaces, and cover the unreadable-file refusal separately.
+  const dir = makeProject('approval:\n  strength: banana\ntier: standard\n')
   try {
     const exec = makeExec({ cwd: dir })
 

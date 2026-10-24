@@ -54,7 +54,7 @@ the `2eda57e` deployment predates the latest tooling/dry-run changes.
 - **A3 — the test runner was blocked by the DSH sandbox.** `npm test` now runs `run-unit-tests.mjs`,
     which detects the sandbox's piped-child `EPERM` and sets `DSH_WORKFLOW_SANDBOX=1`; the six
     environment-dependent tests (five mutation-lock races and the Chromium layout measurement) skip with
-    a visible reason, so the suite is 518 tests / 511 pass / 7 skip / 0 fail in the sandbox. A normal
+    a visible reason, so the suite is 522 tests / 515 pass / 7 skip / 0 fail in the sandbox. A normal
     terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
     `tooling/mutation-check.mjs` also normalises CRLF for anchor matching, restores the original
     Buffer, refreshes its M15 anchor, and exits 3/2/1 on restore/apply/survivor failures. The
@@ -70,6 +70,12 @@ the `2eda57e` deployment predates the latest tooling/dry-run changes.
     that did not happen; `enforced` still refuses. A project file the parser could not fully read is
     no longer merged as "verification not configured": the review uses the strict fallback
     (`enforced`/`always`, unusable classification) instead of silently running under `off`.
+- **Release hardening (0.2.0).** `workflow_set`/`workflow_init` now refuse a present-but-unreadable
+    project file instead of dereferencing `null` or overwriting it; the verification writer is
+    re-validated by the same reader as the gate (policy, confirmation, report, classification, and
+    unknown keys); an unreadable harness table is carried into status/audit as "UNREADABLE", not read
+    as "no harness covers this"; and the static model guidance no longer asserts a project policy it
+    never read. The release tooling is path-portable and has a Windows CI workflow.
 - **A5 — a review that did not run was recorded as a FAIL.** `workflow_review` stored every
     `runReview` outcome; `unavailable`/`misconfigured`/`exhausted`/`incomplete` then became
     `passes:false`, `attempts+1`, a `blocked_reason`, and an evidence row with null

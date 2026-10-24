@@ -306,7 +306,8 @@ never compared bytes; it also exited 0 when an anchor failed or a mutant survive
 compared with the original **Buffer**, anchor matching folds `\r\n`, and `missed.length > 0` or
 `caught !== MUTANTS.length` exits 1. `tooling/mutation-check-lock-probe.mjs` is still a one-shot probe,
 not one of the official harnesses, and is **not wired into the lock**. **VERIFIED** for the approval
-harness (`sources restored byte-for-byte: YES`, 66/66); the lock-probe caveat remains.
+harness (`sources restored byte-for-byte: YES`, 65/65 active mutants; M32 was removed as unreachable
+after the writer began refusing unreadable project files); the lock-probe caveat remains.
 `NEXT-STEPS.md:2885–2886, 3031–3035`.
 
 ---
@@ -465,7 +466,7 @@ like exfiltration stays **high** and is refused monotonically, and `decideStreng
 byte — only the classification moves from medium to low, leaving thresholds, strength and `denyHighAlways`
 intact. `selfDeployAuthorised` increments **only on a real release**, an `info` line names the anchor, and an
 unresolvable anchor logs **DISABLED** rather than widening the range. `workflow_status` does **not** render
-that counter, since it lives in `lib/tools.js`, outside that round. **VERIFIED** offline — 61/61 mutants and
+that counter, since it lives in `lib/tools.js`, outside that round. **VERIFIED** offline — the harness is now 65/65 active mutants and
 review round 1 PASS 8.71 with 0 unexplained differences. `NEXT-STEPS.md:2508–2605, 2762–2798`.
 
 ### What the exemption still refuses, and why that is structural
