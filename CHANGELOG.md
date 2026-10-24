@@ -96,7 +96,8 @@ the `2eda57e` deployment predates the latest tooling/dry-run changes.
   contradicting file while still reporting the class and depth that will be used. `ui` asks for a human
   to look at the rendered result in addition to the unit suite and every covering mutation harness.
   Two fail-closed rules: the shallowest class with no evidence is refused, and no declaration with no
-  evidence raises the depth and requires independent review. **`verification.policy` defaults to `off`
+  evidence raises the depth to the every-harness rung, with review as the substitute when no harness
+  covers the files. **`verification.policy` defaults to `off`
   and changes nothing until it is enabled** — with it off, an undeclared call behaves byte-for-byte as
   before. Not deployed.
 - **The conversation tab 「工作流（本工程）」**, a read-only view of this project's workflow. Not
