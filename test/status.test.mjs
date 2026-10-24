@@ -376,6 +376,29 @@ test('the status version is the package version, not a hardcoded literal', () =>
   }
 })
 
+test('the status human-check wording follows the policy instead of always claiming a refusal', () => {
+  const dir = makeProject('tier: standard\n')
+  try {
+    for (const policy of ['off', 'advisory', 'enforced']) {
+      const status = buildStatus({
+        exec: execFor(dir),
+        config: resolveConfig({ verification: { policy } }),
+        services,
+        declaredClass: 'ui',
+        changedFiles: ['lib/client.js'],
+      })
+      const text = renderStatus(status)
+      if (policy === 'enforced') {
+        assert.match(text, /refuses without human_check/)
+      } else {
+        assert.match(text, new RegExp(`policy ${policy} reports this without refusing`))
+      }
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('the static guidance does not assert a project policy it never read', () => {
   const text = renderWorkflowGuidance(resolveConfig({}))
   assert.doesNotMatch(text, /This project has verification\.policy=off/)

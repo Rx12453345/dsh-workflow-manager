@@ -18,7 +18,7 @@ Each line names the evidence, not an assurance.
 | Item | Evidence |
 |---|---|
 | Six tools register, and the shipped registry validator accepts all six definitions | `DSH_TOOLS_BUNDLE=<extracted>/dsh-tools/lib/index.js node tooling/validate-tool-definition.mjs` → `all 6 tool definitions are acceptable to the shipped registry`, exit 0 (NEXT-STEPS.md:1972, 2440) |
-| The offline unit suite | `node run-unit-tests.mjs` → **524 tests / 523 pass / 0 fail / 1 skip**; the skip is a Windows-only limitation (no catchable `SIGTERM`), not a failing case. In the DSH sandbox the same suite is 524 / 517 pass / 7 skip (six environment-gated cases). |
+| The offline unit suite | `node run-unit-tests.mjs` → **525 tests / 524 pass / 0 fail / 1 skip**; the skip is a Windows-only limitation (no catchable `SIGTERM`), not a failing case. In the DSH sandbox the same suite is 525 / 518 pass / 7 skip (six environment-gated cases). |
 | The full apply/execute/render chain on a fake ctx | `node run-smoke-test.mjs` → `smoke test passed` (NEXT-STEPS.md:1970) |
 | Patch values match code defaults | `node run-config-check.mjs` → `OK: every patch value matches its code default`; `resolved maxDepth is 2` (NEXT-STEPS.md:3155) |
 | The browser half is discoverable | `DSH_CLIENT_MODULES_BUNDLE=<extracted>/dsh-client-modules/lib/index.js node tooling/simulate-client-scan.mjs` STEP 1–5 OK (NEXT-STEPS.md:3154) |

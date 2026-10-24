@@ -1344,16 +1344,19 @@ test('a diff alone is enough evidence, and its headers are read rather than its 
   assert.deepEqual(harmless.files, ['README.md'])
 
   // Git quotes a non-ASCII path; the header parser must unquote it rather than drop the file.
+  const quotedPath = '"a/src/\\346\\226\\207\\346\\241\\243.md"'
+  const quotedNew = '"b/src/\\346\\226\\207\\346\\241\\243.md"'
   const quoted = [
-    'diff --git "a/src/用户.js" "b/src/用户.js"',
-    '--- "a/src/用户.js"',
-    '+++ "b/src/用户.js"',
+    `diff --git ${quotedPath} ${quotedNew}`,
+    `--- ${quotedPath}`,
+    `+++ ${quotedNew}`,
     '@@ -1 +1 @@',
     '-a',
     '+b',
   ].join('\n')
   const quotedResolution = resolveVerificationDepth({ declaredClass: 'docs', diff: quoted })
-  assert.ok(quotedResolution.files.includes('src/用户.js'), JSON.stringify(quotedResolution.files))
+  assert.deepEqual(quotedResolution.files, ['src/文档.md'])
+  assert.equal(quotedResolution.refused, false)
 
   // `diff -ru` has no `diff --git` header, but it does emit a `diff ` boundary per file.
   const nonGit = [
@@ -1372,6 +1375,26 @@ test('a diff alone is enough evidence, and its headers are read rather than its 
   ].join('\n')
   const nonGitResolution = resolveVerificationDepth({ declaredClass: 'docs', diff: nonGit })
   assert.deepEqual(nonGitResolution.files, ['README.md', 'lib/tools.js'])
+
+  // svn has no `diff ` boundary; its per-file boundary is `Index:`.
+  const svn = [
+    'Index: README.md',
+    '===================================================================',
+    '--- README.md\t(revision 1)',
+    '+++ README.md\t(working copy)',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+    'Index: lib/approval.js',
+    '===================================================================',
+    '--- lib/approval.js\t(revision 1)',
+    '+++ lib/approval.js\t(working copy)',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+  ].join('\n')
+  const svnResolution = resolveVerificationDepth({ declaredClass: 'docs', diff: svn })
+  assert.deepEqual(svnResolution.files, ['README.md', 'lib/approval.js'])
 
   // A file NAMED IN THE CONTENT but touched by no header must not raise the class: a diff that
   // merely mentions a security file (a comment, a string, a fixture) is not a security change, and

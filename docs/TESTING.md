@@ -129,7 +129,7 @@ Runs in seconds. Run it after **every** change.
 
 ```powershell
 cd <plugin>
-node run-unit-tests.mjs                       # expect: 524 tests, 523 pass, 0 fail, 1 skipped
+node run-unit-tests.mjs                       # expect: 525 tests, 524 pass, 0 fail, 1 skipped
 node run-smoke-test.mjs                       # expect "smoke test passed"
 node run-config-check.mjs                     # expect 2 OK lines
 $env:DSH_TOOLS_BUNDLE = '<extracted>/dsh-tools/lib/index.js'; node tooling/validate-tool-definition.mjs
@@ -142,9 +142,9 @@ node tooling/sync-to-profile.mjs --check      # expect 0 differ
 `DSH_PROFILE_DIR` overrides the profile (default `~/.dsh/profiles/desktop`). The two shipped-bundle
 tools require the extracted host packages, because those bundles are not vendored here.
 
-The current **524 / 523 pass / 0 fail / 1 skipped** is the real figure measured from this repository in a
+The current **525 / 524 pass / 0 fail / 1 skipped** is the real figure measured from this repository in a
 normal terminal. In the DSH sandbox the runner sets `DSH_WORKFLOW_SANDBOX=1`, so six environment-dependent
-tests skip as well: **524 tests / 517 pass / 0 fail / 7 skipped**. The single non-sandbox skip is a Windows
+tests skip as well: **525 tests / 518 pass / 0 fail / 7 skipped**. The single non-sandbox skip is a Windows
 limitation (the platform has no catchable `SIGTERM`), not a failing case. Test counts drift as work lands;
 **the failure count is the number that must be zero.**
 

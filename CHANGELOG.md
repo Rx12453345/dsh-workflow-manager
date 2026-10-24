@@ -54,7 +54,7 @@ the `2eda57e` deployment predates the latest tooling/dry-run changes.
 - **A3 — the test runner was blocked by the DSH sandbox.** `npm test` now runs `run-unit-tests.mjs`,
     which detects the sandbox's piped-child `EPERM` and sets `DSH_WORKFLOW_SANDBOX=1`; the six
     environment-dependent tests (five mutation-lock races and the Chromium layout measurement) skip with
-    a visible reason, so the suite is 524 tests / 517 pass / 7 skip / 0 fail in the sandbox. A normal
+    a visible reason, so the suite is 525 tests / 518 pass / 7 skip / 0 fail in the sandbox. A normal
     terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
     `tooling/mutation-check.mjs` also normalises CRLF for anchor matching, restores the original
     Buffer, refreshes its M15 anchor, and exits 3/2/1 on restore/apply/survivor failures. The
