@@ -23,6 +23,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 // The lock is reached from the project's own tooling directory: `mutation-check-approval`
 // mutates lib/client.js too, and this harness rewrites the same file, so they must contend.
@@ -31,7 +32,7 @@ import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-l
 /** Every harness takes this lock, so no two of them can rewrite lib/ at the same time. */
 const LABEL = 'tooling/mutation-check-project-tab.mjs'
 
-const ROOT = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const CLIENT = `${ROOT}lib/client.js`
 const only = new Set(process.argv.slice(2))
 

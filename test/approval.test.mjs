@@ -59,7 +59,7 @@ import { applyCore } from '../lib/index.js'
 import { DEFAULT_CONFIG, resolveConfig, configWarnings } from '../lib/config.js'
 import { renderStatus, buildStatus, validateSettingValue, runSet, buildSetToolDefinition } from '../lib/tools.js'
 
-const REPO = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const REPO = fileURLToPath(new URL('..', import.meta.url))
 
 /** A pending execution with the shape `dsh-tools` hands to the pipeline. */
 function makeExec(overrides = {}) {

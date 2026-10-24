@@ -19,7 +19,7 @@ Write-Output "second run exit: $LASTEXITCODE"
 Write-Output "lock file left behind: $(Test-Path $lock)"
 Write-Output ''
 
-Write-Output "step 3 — a THIRD, different harness (the pair is irrelevant; one lock covers all six)"
+Write-Output "step 3 — a THIRD, different harness (the pair is irrelevant; one lock covers all seven)"
 node tooling/mutation-check-work-unit.mjs 2>&1 | Select-Object -Last 6
 Write-Output "work-unit harness exit: $LASTEXITCODE"
 Write-Output "lock file left behind: $(Test-Path $lock)"

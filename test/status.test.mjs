@@ -29,6 +29,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { findChromium, gridStyles, measureLayout, sourceConst } from '../tooling/layout-styles.mjs'
 import { skipInSandbox } from './sandbox.mjs'
@@ -69,7 +70,7 @@ function makeProject(yaml) {
 const execFor = dir => ({ agent: { id: 'agent-1', session: { header: { cwd: dir } } } })
 
 /** The plugin root, for source-level pins of the browser bundle. */
-const REPO = new URL('..', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+const REPO = fileURLToPath(new URL('..', import.meta.url))
 
 /** Services stub: a present subagents service so `canReview` is exercised. */
 const services = {

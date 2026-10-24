@@ -1329,6 +1329,20 @@ test('a diff alone is enough evidence, and its headers are read rather than its 
   assert.equal(resolution.derived, 'logic')
   assert.deepEqual(resolution.files, ['lib/tools.js'])
 
+  // A removed content line beginning with `-- ` is emitted as `--- <text>` and must NOT become
+  // a file header: the same truthful docs declaration would otherwise be REFUSED.
+  const contentMarker = [
+    'diff --git a/README.md b/README.md',
+    '--- a/README.md',
+    '+++ b/README.md',
+    '@@ -1 +1 @@',
+    '--- a removed line that began with two dashes',
+    '+++ a replacement line',
+  ].join('\n')
+  const harmless = resolveVerificationDepth({ declaredClass: 'docs', diff: contentMarker })
+  assert.equal(harmless.refused, false)
+  assert.deepEqual(harmless.files, ['README.md'])
+
   // A file NAMED IN THE CONTENT but touched by no header must not raise the class: a diff that
   // merely mentions a security file (a comment, a string, a fixture) is not a security change, and
   // reading content would let a text pattern be hidden by rewording.
