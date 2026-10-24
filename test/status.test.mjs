@@ -390,6 +390,9 @@ test('the verification writer refuses every value its reader refuses', () => {
     [['verification', 'sources'], ['../bad']],
     [['verification', 'report', 'enabled'], true],
     [['verification', 'policy', 'extra'], 'off'],
+    [['approval', 'strength', 'extra'], 'llm-only'],
+    [['approval', 'exemptTools', '0'], 'pwsh'],
+    [['evaluator', 'bar', 'extra'], 9],
     [['verification'], { policy: 'banana' }],
     [['verification'], { unknownKey: true }],
   ]

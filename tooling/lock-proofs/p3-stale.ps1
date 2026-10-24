@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $proofDir = Join-Path $env:TEMP 'dsh-workflow-lock-proofs'
 New-Item -ItemType Directory -Force $proofDir | Out-Null
-$workspace = Split-Path $root -Parent
+
 $lock = Join-Path $root 'tooling\.mutation-lock'
 Remove-Item $lock -Force -ErrorAction SilentlyContinue
 Push-Location $root
@@ -40,7 +40,7 @@ $recent = [DateTimeOffset]::UtcNow.AddMinutes(-2).ToUnixTimeMilliseconds()
 $json = '{"pid":' + $myPid + ',"at":' + $recent + ',"host":"this-host","label":"a live holder"}'
 Set-Content -Path $lock -Value $json -Encoding ascii -NoNewline
 Write-Output "wrote a 2-minute-old lock held by the live pid $myPid"
-node "$workspace\proofs\lock-takeup.mjs" $lock "" "the next harness" 2>&1
+node "$PSScriptRoot\lock-takeup.mjs" $lock "" "the next harness" 2>&1
 Write-Output "take-up exit: $LASTEXITCODE (2 = refused, correctly: the holder really is alive and inside the cap)"
 Get-Content $lock -Raw
 Remove-Item $lock -Force -ErrorAction SilentlyContinue

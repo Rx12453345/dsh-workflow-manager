@@ -2224,8 +2224,12 @@ test('a review that could not run is not recorded as a verdict', async () => {
   try {
     const reviewOutcomes = new Map()
     const def = buildReviewToolDefinition({ config: resolveConfig({}), reviewOutcomes })
-    const result = await def.execute({ feature: 'no reviewer' }, verificationExec(dir))
+    const result = await def.execute(
+      { feature: 'no reviewer', class: 'security', changed_files: ['lib/approval.js'] },
+      verificationExec(dir),
+    )
     assert.equal(result.status, 'unavailable')
+    assert.equal(result.verification.independentReview.ran, false, 'a failed start must not claim it ran')
     assert.equal(reviewOutcomes.size, 0, 'an unavailable review must not enter the verdict store')
   } finally {
     rmSync(dir, { recursive: true, force: true })

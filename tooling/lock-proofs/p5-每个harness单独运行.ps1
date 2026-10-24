@@ -12,6 +12,7 @@ $harnesses = @(
   @{ name = 'mutation-check-client.mjs';       args = @() },
   @{ name = 'mutation-check-panel.mjs';        args = @() },
   @{ name = 'mutation-check-project-tab.mjs';  args = @() },
+  @{ name = 'mutation-check-verification.mjs'; args = @() },
   @{ name = 'mutation-check-work-unit.mjs';    args = @() }
 )
 
