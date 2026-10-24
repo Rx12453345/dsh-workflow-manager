@@ -333,7 +333,7 @@ test('other section writes still have to be objects', () => {
   }
 })
 
-test('an unreadable project file is refused by both writers, not dereferenced', () => {
+test('an unreadable project file is refused by both writers, not dereferenced', async () => {
   const dir = makeProject(undefined)
   try {
     mkdirSync(join(dir, '.dsh', 'workflow.yml'), { recursive: true })
@@ -351,6 +351,25 @@ test('an unreadable project file is refused by both writers, not dereferenced', 
     const init = runInit({ exec, config: resolveConfig({}), requested: { tier: 'strict' } })
     assert.equal(init.status, 'unreadable-project-file')
     assert.equal(init.ok, false)
+
+    // The model-facing render must include the reason, not "undefined".
+    const tool = buildInitToolDefinition({ config: resolveConfig({}) })
+    const result = await tool.execute({ tier: 'strict' }, exec)
+    const text = tool.output.render({}, result)[0].text
+    assert.match(text, /exists but could not be read/)
+    assert.doesNotMatch(text, /undefined/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the status version is the package version, not a hardcoded literal', () => {
+  const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'))
+  const dir = makeProject('tier: standard\n')
+  try {
+    const status = buildStatus({ exec: execFor(dir), config: resolveConfig({}), services })
+    assert.equal(status.plugin.version, pkg.version)
+    assert.match(renderStatus(status), new RegExp(`v${pkg.version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -369,6 +388,8 @@ test('the verification writer refuses every value its reader refuses', () => {
     [['verification', 'report'], 'yes'],
     [['verification', 'allowUnknownSources'], 'yes'],
     [['verification', 'sources'], ['../bad']],
+    [['verification', 'report', 'enabled'], true],
+    [['verification', 'policy', 'extra'], 'off'],
     [['verification'], { policy: 'banana' }],
     [['verification'], { unknownKey: true }],
   ]

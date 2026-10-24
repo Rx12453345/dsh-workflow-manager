@@ -1002,6 +1002,24 @@ test('a workflow_set target project selects the gate, not the session cwd', () =
   }
 })
 
+test('repairing a malformed approval section clears the stale "gate broken" report', () => {
+  clearApprovalStateCache()
+  const dir = makeProject('approval:\n  strength: banana\n')
+  try {
+    const exec = makeExec({ cwd: dir })
+    const broken = resolveApprovalState(exec, {}, { defaults: DEFAULTS })
+    assert.equal(broken.gate.usable, false)
+    writeFileSync(join(dir, '.dsh', 'workflow.yml'), 'approval:\n  strength: ask-user\n', 'utf8')
+    const repaired = resolveApprovalState(exec, {}, { defaults: DEFAULTS })
+    assert.equal(repaired.gate.usable, true)
+    assert.equal(repaired.gate.strength, 'ask-user')
+    assert.deepEqual(repaired.gate.problems, [])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
+})
+
 test('the approval memory treats a case-varied Windows path as one project', () => {
   if (process.platform !== 'win32') return
   clearApprovalStateCache()

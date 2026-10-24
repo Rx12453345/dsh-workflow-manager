@@ -306,8 +306,8 @@ never compared bytes; it also exited 0 when an anchor failed or a mutant survive
 compared with the original **Buffer**, anchor matching folds `\r\n`, and `missed.length > 0` or
 `caught !== MUTANTS.length` exits 1. `tooling/mutation-check-lock-probe.mjs` is still a one-shot probe,
 not one of the official harnesses, and is **not wired into the lock**. **VERIFIED** for the approval
-harness (`sources restored byte-for-byte: YES`, 65/65 active mutants; M32 was removed as unreachable
-after the writer began refusing unreadable project files); the lock-probe caveat remains.
+harness (`sources restored byte-for-byte: YES`, 65/65 active mutants; M32 was removed because the writer
+now refuses the unreadable-file path it exercised); the lock-probe caveat remains.
 `NEXT-STEPS.md:2885–2886, 3031–3035`.
 
 ---

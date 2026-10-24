@@ -7,9 +7,10 @@ New-Item -ItemType Directory -Force $proofDir | Out-Null
 $tooling = Join-Path $root 'tooling'
 $lock = Join-Path $tooling '.mutation-lock'
 $outA = (Join-Path $proofDir 'p1-a.log')
+$errA = (Join-Path $proofDir 'p1-a.err')
 $outB = (Join-Path $proofDir 'p1-b.log')
 $errB = (Join-Path $proofDir 'p1-b.err')
-foreach ($p in @($lock, $outA, $outB, $errB)) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
+foreach ($p in @($lock, $outA, $errA, $outB, $errB)) { Remove-Item $p -Force -ErrorAction SilentlyContinue }
 
 $client = Join-Path $root 'lib\client.js'
 $before = (Get-FileHash $client -Algorithm SHA256).Hash
@@ -20,7 +21,7 @@ Write-Output ''
 # A: the client harness, M12 only (enough that it holds the lock for a few seconds).
 # B: the panel harness, M1 only — same file (client.js), so this is exactly the pair that
 #    left two mutants applied on 2026-10-12.
-$a = Start-Process -FilePath node -ArgumentList 'tooling/mutation-check-client.mjs', 'M12' -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $outA -RedirectStandardError $errB
+$a = Start-Process -FilePath node -ArgumentList 'tooling/mutation-check-client.mjs', 'M12' -WorkingDirectory $root -PassThru -NoNewWindow -RedirectStandardOutput $outA -RedirectStandardError $errA
 Write-Output "A = tooling/mutation-check-client.mjs M12  (pid $($a.Id))"
 
 $deadline = (Get-Date).AddSeconds(60)
@@ -54,3 +55,5 @@ Write-Output "source tree untouched (same hash): $($before -eq $after)"
 Write-Output ''
 Write-Output '--- A tail ---'
 Get-Content $outA | Select-Object -Last 8
+Write-Output '--- A stderr tail ---'
+Get-Content $errA -ErrorAction SilentlyContinue | Select-Object -Last 8
