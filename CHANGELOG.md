@@ -76,8 +76,9 @@ the `2eda57e` deployment predates the latest tooling/dry-run changes.
     unknown keys, and nested paths are refused); an unreadable harness table is carried into
     status/audit as "UNREADABLE", not read as "no harness covers this"; the static model guidance no
     longer asserts a project policy it never read; the init render carries the refusal reason; the
-    status version is read from `package.json`; and repairing an unreadable approval section clears
-    the stale "gate broken" flag while keeping the stricter per-axis values. The release tooling is
+    status version is read from `package.json`; repairing an unreadable approval section clears the
+    stale "gate broken" flag while keeping the stricter per-axis values; and the diff parser reads
+    only header blocks, unquotes git paths, and handles `diff -ru` boundaries. The release tooling is
     path-portable and has a Windows CI workflow.
 - **A5 — a review that did not run was recorded as a FAIL.** `workflow_review` stored every
     `runReview` outcome; `unavailable`/`misconfigured`/`exhausted`/`incomplete` then became

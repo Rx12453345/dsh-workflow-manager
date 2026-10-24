@@ -1343,6 +1343,36 @@ test('a diff alone is enough evidence, and its headers are read rather than its 
   assert.equal(harmless.refused, false)
   assert.deepEqual(harmless.files, ['README.md'])
 
+  // Git quotes a non-ASCII path; the header parser must unquote it rather than drop the file.
+  const quoted = [
+    'diff --git "a/src/用户.js" "b/src/用户.js"',
+    '--- "a/src/用户.js"',
+    '+++ "b/src/用户.js"',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+  ].join('\n')
+  const quotedResolution = resolveVerificationDepth({ declaredClass: 'docs', diff: quoted })
+  assert.ok(quotedResolution.files.includes('src/用户.js'), JSON.stringify(quotedResolution.files))
+
+  // `diff -ru` has no `diff --git` header, but it does emit a `diff ` boundary per file.
+  const nonGit = [
+    'diff -ru a/README.md b/README.md',
+    '--- a/README.md',
+    '+++ b/README.md',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+    'diff -ru a/lib/tools.js b/lib/tools.js',
+    '--- a/lib/tools.js',
+    '+++ b/lib/tools.js',
+    '@@ -1 +1 @@',
+    '-a',
+    '+b',
+  ].join('\n')
+  const nonGitResolution = resolveVerificationDepth({ declaredClass: 'docs', diff: nonGit })
+  assert.deepEqual(nonGitResolution.files, ['README.md', 'lib/tools.js'])
+
   // A file NAMED IN THE CONTENT but touched by no header must not raise the class: a diff that
   // merely mentions a security file (a comment, a string, a fixture) is not a security change, and
   // reading content would let a text pattern be hidden by rewording.
