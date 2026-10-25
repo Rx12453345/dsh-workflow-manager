@@ -12,6 +12,20 @@ live until it has been synced and DSH restarted.
 
 ## [Unreleased] — 2026-10-25
 
+### Added — mutation coverage for HANDOFF governance, the waiver and the docs fast lane
+
+`tooling/mutation-check-governance.mjs` adds seven mutants for the rules `test/governance.test.mjs`
+states: the open-feature refusal, the empty-waiver-reason refusal, the waiver's durable audit record,
+the docs `BUILD → EVALUATE` edge, the "no recipe adds `BUILD → COMMIT`" invariant, the immutable base
+graph, and the fast-lane announcement. Unlike the other harnesses it never writes `lib/`: every mutant
+runs the real suite in a unique `%TEMP%` copy, so no mutant can reach the canonical sources, and its
+integrity line `canonical sources unchanged ... YES` checks `lib/tools.js` and `lib/advance.js`
+byte-for-byte. It still takes the shared `tooling/.mutation-lock` like every other harness. Its verdict
+logic is itself pinned by `test/governance-mutation.test.mjs` (a red baseline, a crash with no passing
+test, and red-for-the-wrong-test are each NOT a catch). Measured 2026-10-25: baseline 651 / 644 pass /
+0 fail / 7 skip, G01–G07 all CAUGHT. `lib/review.js` now discovers it, so a change to `lib/advance.js`
+or `lib/tools.js` names it in the harness plan.
+
 ### Fixed — a review can no longer destroy the project it reviews
 
 On 2026-10-25 a `workflow_review` reviewer created a directory **junction** to the workspace under

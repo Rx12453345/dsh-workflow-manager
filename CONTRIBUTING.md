@@ -76,14 +76,18 @@ node tooling/mutation-check-panel.mjs         # the sidebar panel
 node tooling/mutation-check-project-tab.mjs   # the conversation tab
 node tooling/mutation-check-work-unit.mjs     # work-unit state
 node tooling/mutation-check-verification.mjs  # the verification-depth policy
+node tooling/mutation-check-governance.mjs    # HANDOFF governance, the waiver, the docs fast lane
 ```
 
 Each one injects a defect, runs the suite, records whether it went red, then **restores the source byte
-for byte**.
+for byte**. `mutation-check-governance.mjs` runs each mutant in a throwaway `%TEMP%` copy instead, so no
+mutant is ever written into the canonical `lib/` (it still takes the shared lock, and verifies
+`lib/tools.js` and `lib/advance.js` byte-for-byte); its check line is
+`canonical sources unchanged ... YES`.
 
 > **In the DSH Windows sandbox these harnesses capture their child's output through temp files,
 > not a pipe (`tooling/child-output.mjs`), because the sandbox denies a piped child (EPERM).** That
-> covers the constraints, approval, verification and work-unit harnesses. `mutation-check-client.mjs`,
+> covers the constraints, approval, governance, verification and work-unit harnesses. `mutation-check-client.mjs`,
 > `mutation-check-panel.mjs` and `mutation-check-project-tab.mjs` additionally run the Chromium layout
 > test, which the sandbox cannot launch, so run those three in a normal terminal. The unit suite is not a
 > substitute for a security-depth harness; a security change with no harness result is not finished.
@@ -104,6 +108,7 @@ for byte**.
 
 ```
 source restored byte-for-byte: YES        <- required
+canonical sources unchanged ...: YES      <- the governance harness's equivalent (no mutant reaches lib/)
 ```
 
 If it says anything else, you are working on a corrupted source tree. Compare the constants against the
@@ -309,6 +314,7 @@ history the offline suite was fully green while the real host broke on the first
 - [ ] `docs/DESIGN.md` and `docs/PITFALLS.md` read; any guard I removed is named with the pitfall it came from
 - [ ] Offline suite fully green (0 failures), including `validate-tool-definition` and `check-installed-config`
 - [ ] Every **covering** mutation harness run **singly**, and each printed `source restored byte-for-byte: YES`
+      (or, for `mutation-check-governance.mjs`, `canonical sources unchanged ... YES`)
 - [ ] `check-behaviour-delta.mjs` run if I touched the approval classifier; result 0, 1 or 2 read correctly
 - [ ] Depth class declared and checked against the actual changed files; `security` treated as non-degradable;
       a human has looked if the class is `ui`

@@ -1962,9 +1962,19 @@ test('harness selection follows the depth, not a hardcoded list', () => {
   const depth2 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESSES, files: ['lib/tools.js'] })
   assert.deepEqual(depth2.required, [
     'mutation-check-approval.mjs',
+    'mutation-check-governance.mjs',
     'mutation-check-verification.mjs',
     'mutation-check-work-unit.mjs',
   ])
+  // The governance harness declares BOTH governance files, so a change to either one names it in
+  // the harness plan rather than silently resolving to "the unit suite covers this".
+  for (const file of ['lib/tools.js', 'lib/advance.js']) {
+    const plan = harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: [file] })
+    assert.ok(
+      plan.required.includes('mutation-check-governance.mjs'),
+      `the governance harness must cover ${file}; got ${plan.required.join(', ')}`,
+    )
+  }
 
   // Every covering harness includes the verification-depth harness's CFG/REVIEW/TOOLS targets.
   for (const file of ['lib/config.js', 'lib/review.js', 'lib/tools.js']) {

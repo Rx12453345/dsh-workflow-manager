@@ -349,12 +349,13 @@ than text patterns: text can only be dodged, structure can be checked. See
 - **`simulate-client-scan.mjs` scans the current checkout by default.** Set
   `DSH_CLIENT_MODULES_BUNDLE=<extracted>/dsh-client-modules/lib/index.js` first; the shipped bundle is
   not vendored here. Pass a different package directory if needed.
-- **The mutation harnesses must never run concurrently** — they rewrite source files, and a shared lock
-  now makes the second one fail fast.
-- **The code harnesses run in-session; the UI ones do not.** Constraints, approval, verification and
-  work-unit capture their child's output through temp files, so they work in the DSH sandbox.
-  `mutation-check-client`, `-panel` and `-project-tab` also launch Chromium for the layout test and need a
-  normal terminal.
+- **The mutation harnesses must never run concurrently** — they rewrite source files (the governance
+  harness copies the project instead, but shares the same lock), and a shared lock now makes the second
+  one fail fast.
+- **The code harnesses run in-session; the UI ones do not.** Constraints, approval, governance,
+  verification and work-unit capture their child's output through temp files, so they work in the DSH
+  sandbox. `mutation-check-client`, `-panel` and `-project-tab` also launch Chromium for the layout test
+  and need a normal terminal.
 - **`node --check` does not catch scope errors.** One round nearly broke because a module-level helper
   referenced a dictionary inside a factory: syntactically valid, but a runtime `ReferenceError` that took
   the whole configuration table down.

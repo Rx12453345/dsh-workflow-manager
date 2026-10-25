@@ -182,10 +182,16 @@ node tooling/mutation-check-panel.mjs         # the sidebar panel
 node tooling/mutation-check-project-tab.mjs   # the conversation tab
 node tooling/mutation-check-work-unit.mjs     # work-unit state
 node tooling/mutation-check-verification.mjs  # the verification-depth policy
+node tooling/mutation-check-governance.mjs    # HANDOFF governance, the waiver, the docs fast lane
 ```
 
 Each mutant: inject a defect → run the suite → record whether it went red → **restore the source
-byte-for-byte**.
+byte-for-byte**. `mutation-check-governance.mjs` is the one exception to that shape: it copies the
+project into a unique `%TEMP%` directory and runs the mutant THERE, so no mutant is ever written into
+the canonical `lib/` (the shared lock is still taken, and `lib/tools.js` and `lib/advance.js` are
+verified byte-for-byte). Its check line is `canonical sources unchanged ... YES` rather than
+`sources restored byte-for-byte: YES`. Everything else — the lock, the named-test requirement and the
+exit codes — is the same.
 
 **The captured child now runs inside the DSH Windows sandbox.** Each harness captures its child's
 output through temp files (`tooling/child-output.mjs`) instead of a pipe, because the sandbox denies a

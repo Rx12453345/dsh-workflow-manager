@@ -24,7 +24,7 @@ Each line names the evidence, not an assurance.
 | The browser half is discoverable | `DSH_CLIENT_MODULES_BUNDLE=<extracted>/dsh-client-modules/lib/index.js node tooling/simulate-client-scan.mjs` STEP 1–5 OK (NEXT-STEPS.md:3154) |
 | Phase-machine refusals | Real host: an illegal transition lists the legal ones; `BUILD` is refused without the boot checklist; `pick` **moves** `PLAN → PICK` (TESTING.md:330) |
 | Bootstrap `open_feature` message | Fixed: `lib/advance.js` branches on `counts.open > 0`; `test/governance.test.mjs` asserts the item never says "every feature is complete" while one is open, and still names the genuinely closed cases |
-| Governance: `HANDOFF` refuses open features, the audited waiver, and the `docs` fast lane | **Offline only:** `test/governance.test.mjs` covers the refusal, the waiver-with-reason path and its audit record, and the single `BUILD → EVALUATE` edge. Not yet exercised on a real host. |
+| Governance: `HANDOFF` refuses open features, the audited waiver, and the `docs` fast lane | **Offline only:** `test/governance.test.mjs` covers the refusal, the waiver-with-reason path and its audit record, and the single `BUILD → EVALUATE` edge. Mutation coverage: `mutation-check-governance.mjs` G01–G07 all CAUGHT in a throwaway copy, canonical sources unchanged (2026-10-25). Not yet exercised on a real host. |
 | Reverse self-certification | Real host: with no review this session, `record-review` is refused with **"a claim that one passed is not evidence"** (TESTING.md:331) |
 | Review fingerprinting | Unit tests; mutation turns 2 tests red; real `FEATURES.json` carries `evidence[].fingerprint` (NEXT-STEPS.md:1392, 1409–1415) |
 | Independent review round-trip, delegation depth, and main-context isolation | Real host: a depth-1 child created a depth-2 reviewer with no `SubagentDepthError`, and the full round-trip returned to the main conversation as a summary only (NEXT-STEPS.md:1403–1407) |
@@ -204,7 +204,7 @@ the host's own function), or an explicit decision to leave it out.
 - No automatic retry after a failed review: `runReview` returns `exhausted`; changing code and re-running
   is the phase machine's job, so the review tool stays side-effect free.
 - Escalation suggestions require user confirmation; nothing auto-upgrades a tier.
-- `tooling/mutation-check-lock-probe.mjs` is a one-shot probe, not a seventh official mutator, and it is
+- `tooling/mutation-check-lock-probe.mjs` is a one-shot probe, not one of the official mutators, and it is
   **not wired into the mutation lock**. Promoting it is an open decision, deliberately left to a human.
 
 ---
@@ -252,20 +252,30 @@ reviewed.
 **What it would take.** Raise `evaluator.maxRounds` and re-run `workflow_review`, or have a human review
 the diffs.
 
-### No mutation harness covers the governance / fast-lane logic
-`test/governance.test.mjs` covers the `HANDOFF` open-feature refusal, the waiver path and its audit
-record, the `docs` fast lane and the reviewer-prompt instruction, but **no mutation harness injects
-defects into that logic**. The seven official harnesses target the constraint ledger, approval,
-verification depth, work-unit state and the three UI surfaces. A regression in `lib/advance.js`'s
-governance branches or `lib/tools.js`'s fast-lane rendering could therefore survive with the suite green.
-**What it would take.** A `mutation-check-governance.mjs` with anchors for the waiver branch, the
-`open → done` mapping and the `BUILD → EVALUATE` edge table, wired into `tooling/.mutation-lock` like the
-others.
+### Mutation coverage for the governance / fast-lane logic — **RESOLVED (2026-10-25)**
+`test/governance.test.mjs` covered the `HANDOFF` open-feature refusal, the waiver path and its audit
+record, the `docs` fast lane and the reviewer-prompt instruction, but no mutation harness injected
+defects into that logic, so a regression there could survive with the suite green. `tooling/mutation-check-governance.mjs`
+now closes it with seven mutants, each run in a throwaway `%TEMP%` copy and each required to turn the
+suite RED for a NAMED test:
+
+- G01 the open-feature refusal AND the empty-reason guard removed (both, because either guard alone still
+  refuses — the "silent handoff" defect would otherwise not be reachable through the public tool);
+- G02 an empty waiver reason accepted;
+- G03 the waiver echoed but never persisted to the workflow state;
+- G04 the `docs` recipe gains an illegal `BUILD → COMMIT` edge;
+- G05 the docs fast lane silently disappears;
+- G06 the immutable base graph itself gains `BUILD → COMMIT`;
+- G07 the fast lane moves `BUILD → EVALUATE` but is not announced.
+
+Measured 2026-10-25: baseline 651 tests / 644 pass / 0 fail / 7 skip, `G01–G07` all CAUGHT, canonical
+sources unchanged. The verdict logic itself is pinned by `test/governance-mutation.test.mjs` (a red
+baseline, a crash with no passing test and a red-for-the-wrong-test run are all NOT a catch).
 
 ### The UI mutation harnesses still need a normal terminal
 The three harnesses that exercise a rendered surface — `mutation-check-client.mjs`,
 `mutation-check-panel.mjs`, `mutation-check-project-tab.mjs` — launch Chromium for the layout test. The DSH
-sandbox cannot launch it, so they cannot produce a harness result there; the other four now run in-sandbox
+sandbox cannot launch it, so they cannot produce a harness result there; the other five now run in-sandbox
 through the file-backed child capture.
 **Why it is unfixed.** It is the browser launch, not the capture.
 **What it would take.** Run them in a normal terminal (the documented path), or find a headless engine the
