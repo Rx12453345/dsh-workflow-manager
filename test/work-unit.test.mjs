@@ -45,6 +45,7 @@ import {
   FEATURES_RELATIVE_PATH,
   WORKFLOW_STATE_RELATIVE_PATH,
   fingerprint,
+  reviewFreshness,
   readFeatures,
   readState,
   writeFeatures,
@@ -644,6 +645,75 @@ test('a mismatched record under the right key is refused as a cross-unit verdict
     assert.equal(applied.ok, false, 'a verdict from another unit is not evidence here')
     assert.equal(applied.status, 'cross-unit-review')
     assert.equal(readFeatures(dir, 'y').features.features[0].passes, false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('review freshness is per work unit: a stale review in X does not block or mark Y', async () => {
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const { reviewDef, reviewExec } = reviewRig(options, execFor(dir))
+    const def = buildAdvanceToolDefinition(options)
+
+    writeFileSync(join(dir, 'a.js'), 'let x = 1\n', 'utf8')
+    await planAndPick(def, dir, 'x')
+    await planAndPick(def, dir, 'y')
+
+    // The review (and its file set) belongs to unit X only.
+    await reviewDef.execute({ feature: 'x work', work_unit: 'x', changed_files: ['a.js'] }, reviewExec)
+    const applied = await def.execute(
+      { action: 'record-review', feature_id: 'F001', work_unit: 'x' },
+      execFor(dir),
+    )
+    assert.equal(applied.ok, true, JSON.stringify(applied))
+
+    assert.equal(reviewFreshness(dir, 'x', readFeatures(dir, 'x').features, 'F001').state, 'fresh')
+    assert.equal(
+      reviewFreshness(dir, 'y', readFeatures(dir, 'y').features, 'F001').state,
+      'none',
+      'a review in X must not become evidence in Y',
+    )
+
+    writeFileSync(join(dir, 'a.js'), 'let x = 2\n', 'utf8')
+    assert.equal(reviewFreshness(dir, 'x', readFeatures(dir, 'x').features, 'F001').state, 'stale')
+    assert.equal(
+      reviewFreshness(dir, 'y', readFeatures(dir, 'y').features, 'F001').state,
+      'none',
+      'a stale review in X must not make Y stale either',
+    )
+
+    writeState(dir, { ...readState(dir, 'x').state, phase: 'COMMIT' }, 'x')
+    const xHandoff = await def.execute({ action: 'advance', to: 'HANDOFF', work_unit: 'x' }, execFor(dir))
+    assert.equal(xHandoff.ok, false)
+    assert.equal(xHandoff.status, 'stale-review')
+
+    // workflow_status must read the SAME unit files. Before work_unit was threaded through,
+    // it read the project-level FEATURES.json and reported none for a stale unit.
+    const statusDef = buildToolDefinition({ config: resolveConfig({}), ctx: null, services: null })
+    const xStatus = await statusDef.execute({ work_unit: 'x' }, execFor(dir))
+    assert.equal(xStatus.reviewFreshness.state, 'stale')
+    assert.match(renderStatus(xStatus), /STALE for F001/)
+
+    writeState(dir, { ...readState(dir, 'y').state, phase: 'COMMIT' }, 'y')
+    // Y'S OWN FEATURE IS STILL OPEN, so the (newer) HANDOFF governance gate refuses a plain
+    // handoff. That is a different rule from the one under test here — X's stale review must not
+    // reach Y — so Y hands off with an explicit waiver, which is exactly the documented way past
+    // the open-feature gate. The assertions below stay about freshness: Y has no review evidence.
+    const yHandoff = await def.execute(
+      {
+        action: 'advance',
+        to: 'HANDOFF',
+        work_unit: 'y',
+        waive_open_features: true,
+        waiver_reason: 'the unit is being handed off with its feature unfinished, deliberately',
+      },
+      execFor(dir),
+    )
+    assert.equal(yHandoff.ok, true, JSON.stringify(yHandoff))
+    assert.equal(yHandoff.reviewFreshness, undefined, 'Y has no review evidence of its own')
+    assert.equal(yHandoff.waiver.reason, 'the unit is being handed off with its feature unfinished, deliberately')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

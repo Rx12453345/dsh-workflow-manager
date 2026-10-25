@@ -1182,32 +1182,42 @@ test('workflow_status prints the official warning verbatim for the strengths tha
   // so each one starts from the configuration it is testing (a restart is the production
   // equivalent).
   clearApprovalStateCache()
-  const status = (approval, approvalStats, approvalReview) =>
-    buildStatus({
-      exec: makeExec({ cwd: process.cwd() }),
-      config: { approval },
-      services: { get: () => undefined },
-      workspaceDir: process.cwd(),
-      approvalStats,
-      approvalReview,
-    })
+  // A TEMP PROJECT, NOT THE CHECKOUT. This repository now opts into the workflow itself
+  // (`.dsh/workflow.yml`), and a status read of `process.cwd()` would use that file instead
+  // of the `config` this test supplies. The test is about the warning renderer, so it gets a
+  // project with no override.
+  const dir = makeProject(null)
+  try {
+    const status = (approval, approvalStats, approvalReview) =>
+      buildStatus({
+        exec: makeExec({ cwd: dir }),
+        config: { approval },
+        services: { get: () => undefined },
+        workspaceDir: dir,
+        approvalStats,
+        approvalReview,
+      })
 
-  const quiet = renderStatus(status({ strength: 'ask-user' }))
-  assert.ok(!quiet.includes('approval warning:'))
+    const quiet = renderStatus(status({ strength: 'ask-user' }))
+    assert.ok(!quiet.includes('approval warning:'))
 
-  clearApprovalStateCache()
-  const loud = renderStatus(status({ strength: 'llm-only' }, () => ({ reviewerCalls: 3, reviewerFailures: 1 }), { hasLlm: () => true }))
-  for (const line of OFFICIAL_AUTO_REVIEW_WARNING.english) {
-    assert.ok(loud.includes(`approval warning: ${line}`), `missing verbatim warning:\n${line}`)
+    clearApprovalStateCache()
+    const loud = renderStatus(status({ strength: 'llm-only' }, () => ({ reviewerCalls: 3, reviewerFailures: 1 }), { hasLlm: () => true }))
+    for (const line of OFFICIAL_AUTO_REVIEW_WARNING.english) {
+      assert.ok(loud.includes(`approval warning: ${line}`), `missing verbatim warning:\n${line}`)
+    }
+    assert.match(loud, /approval reviewer: runnable \(3 reviewer call\(s\) this load\)/)
+
+    // A configured-but-unrunnable reviewer must be visible: the strength promises the model
+    // decides, while every gated call would in fact fail closed.
+    clearApprovalStateCache()
+    const blocked = renderStatus(status({ strength: 'llm-then-user' }, undefined, { hasLlm: () => false }))
+    assert.match(blocked, /approval reviewer: NOT runnable/)
+    assert.match(blocked, /llm` service is absent/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
   }
-  assert.match(loud, /approval reviewer: runnable \(3 reviewer call\(s\) this load\)/)
-
-  // A configured-but-unrunnable reviewer must be visible: the strength promises the model
-  // decides, while every gated call would in fact fail closed.
-  clearApprovalStateCache()
-  const blocked = renderStatus(status({ strength: 'llm-then-user' }, undefined, { hasLlm: () => false }))
-  assert.match(blocked, /approval reviewer: NOT runnable/)
-  assert.match(blocked, /llm` service is absent/)
 })
 
 test('the status renderer survives every malformed approval shape a hand-edited file can produce', () => {
@@ -1867,24 +1877,30 @@ test('an unanswerable prompt does not weaken the gate: the high-risk guard is un
 
 test('workflow_status DETECTS an unsatisfiable strength instead of printing a healthy approval line', () => {
   clearApprovalStateCache()
-  const approval = fakeApproval('never')
-  const status = buildStatus({
-    exec: makeExec({ cwd: process.cwd() }),
-    config: { approval: { strength: 'ask-user' } },
-    services: { get: () => undefined },
-    workspaceDir: process.cwd(),
-    approvalChannel: { get: () => approval },
-  })
+  const dir = makeProject(null)
+  try {
+    const approval = fakeApproval('never')
+    const status = buildStatus({
+      exec: makeExec({ cwd: dir }),
+      config: { approval: { strength: 'ask-user' } },
+      services: { get: () => undefined },
+      workspaceDir: dir,
+      approvalChannel: { get: () => approval },
+    })
 
-  assert.equal(status.effectiveConfig.approval.promptChannel.state, 'disabled')
-  assert.equal(status.effectiveConfig.approval.promptChannel.policy, 'never')
-  const text = renderStatus(status)
-  assert.match(text, /APPROVAL NOT SATISFIABLE HERE/)
-  assert.match(text, /settings page|\.dsh\/workflow\.yml/)
-  assert.doesNotMatch(text, /value=llm-only|value=off/, 'the status must not advertise the downgrade command')
-  assert.ok(text.includes(APPROVAL_REMEDY))
-  assert.match(text, /as if a human had rejected it/)
-  assert.doesNotThrow(() => JSON.stringify(status))
+    assert.equal(status.effectiveConfig.approval.promptChannel.state, 'disabled')
+    assert.equal(status.effectiveConfig.approval.promptChannel.policy, 'never')
+    const text = renderStatus(status)
+    assert.match(text, /APPROVAL NOT SATISFIABLE HERE/)
+    assert.match(text, /settings page|\.dsh\/workflow\.yml/)
+    assert.doesNotMatch(text, /value=llm-only|value=off/, 'the status must not advertise the downgrade command')
+    assert.ok(text.includes(APPROVAL_REMEDY))
+    assert.match(text, /as if a human had rejected it/)
+    assert.doesNotThrow(() => JSON.stringify(status))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
+  }
 })
 
 test('workflow_status states the conditional risk when the environment cannot be read', () => {
@@ -1892,25 +1908,31 @@ test('workflow_status states the conditional risk when the environment cannot be
   // `workflow_status` runs with whatever context it was given, and in a deployment where the
   // `approval` service cannot be reached the honest answer is an explicit IF — a conditional
   // warning that is true beats a detection that is invented.
-  for (const [label, approvalChannel] of [
-    ['no channel at all', undefined],
-    ['a channel whose service is absent', { get: () => undefined }],
-    ['a channel whose service cannot answer', { get: () => ({}) }],
-  ]) {
-    const status = buildStatus({
-      exec: makeExec({ cwd: process.cwd() }),
-      config: { approval: { strength: 'llm-then-user' } },
-      services: { get: () => undefined },
-      workspaceDir: process.cwd(),
-      approvalChannel,
-    })
-    assert.equal(status.effectiveConfig.approval.promptChannel.state, 'unknown', label)
-    const text = renderStatus(status)
-    assert.match(text, /approval satisfaction UNKNOWN/, label)
-    assert.match(text, /IF approval prompts are unavailable in this session/, label)
-    assert.ok(text.includes(APPROVAL_REMEDY), label)
-    // It must NOT claim the detected case.
-    assert.ok(!text.includes('APPROVAL NOT SATISFIABLE HERE'), label)
+  const dir = makeProject(null)
+  try {
+    for (const [label, approvalChannel] of [
+      ['no channel at all', undefined],
+      ['a channel whose service is absent', { get: () => undefined }],
+      ['a channel whose service cannot answer', { get: () => ({}) }],
+    ]) {
+      const status = buildStatus({
+        exec: makeExec({ cwd: dir }),
+        config: { approval: { strength: 'llm-then-user' } },
+        services: { get: () => undefined },
+        workspaceDir: dir,
+        approvalChannel,
+      })
+      assert.equal(status.effectiveConfig.approval.promptChannel.state, 'unknown', label)
+      const text = renderStatus(status)
+      assert.match(text, /approval satisfaction UNKNOWN/, label)
+      assert.match(text, /IF approval prompts are unavailable in this session/, label)
+      assert.ok(text.includes(APPROVAL_REMEDY), label)
+      // It must NOT claim the detected case.
+      assert.ok(!text.includes('APPROVAL NOT SATISFIABLE HERE'), label)
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
   }
 })
 
@@ -1960,31 +1982,37 @@ test('the new prompt-channel report survives every malformed shape a payload can
   // The renderer must never assume shape, and the new field is one more chance to get that
   // wrong. `workflow_status` is the surface a maintainer reads FIRST when the gate denies
   // everything, so a throwing render would hide exactly the diagnostic that is needed.
-  const status = buildStatus({
-    exec: makeExec({ cwd: process.cwd() }),
-    config: { approval: { strength: 'ask-user' } },
-    services: { get: () => undefined },
-    workspaceDir: process.cwd(),
-    approvalChannel: { get: () => fakeApproval('never') },
-  })
-  const shapes = [
-    { state: 'disabled', detail: 7, autoDenials: 'x' },
-    { state: 'disabled', detail: { not: 'a string' }, autoDenials: 1.5 },
-    'not an object',
-    42,
-    null,
-    ['disabled'],
-    { state: 'askable', autoDenials: null },
-    { state: 'disabled', detail: 'x', autoDenials: 0 },
-  ]
-  for (const shape of shapes) {
-    status.effectiveConfig.approval.promptChannel = shape
-    assert.doesNotThrow(() => renderStatus(status), `promptChannel ${JSON.stringify(shape)} broke the renderer`)
+  const dir = makeProject(null)
+  try {
+    const status = buildStatus({
+      exec: makeExec({ cwd: dir }),
+      config: { approval: { strength: 'ask-user' } },
+      services: { get: () => undefined },
+      workspaceDir: dir,
+      approvalChannel: { get: () => fakeApproval('never') },
+    })
+    const shapes = [
+      { state: 'disabled', detail: 7, autoDenials: 'x' },
+      { state: 'disabled', detail: { not: 'a string' }, autoDenials: 1.5 },
+      'not an object',
+      42,
+      null,
+      ['disabled'],
+      { state: 'askable', autoDenials: null },
+      { state: 'disabled', detail: 'x', autoDenials: 0 },
+    ]
+    for (const shape of shapes) {
+      status.effectiveConfig.approval.promptChannel = shape
+      assert.doesNotThrow(() => renderStatus(status), `promptChannel ${JSON.stringify(shape)} broke the renderer`)
+    }
+    // The detected case still renders when the shape is intact, so the loop above is not
+    // passing for the wrong reason.
+    status.effectiveConfig.approval.promptChannel = { state: 'disabled', detail: 'policy "never"', autoDenials: 0 }
+    assert.match(renderStatus(status), /APPROVAL NOT SATISFIABLE HERE/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+    clearApprovalStateCache()
   }
-  // The detected case still renders when the shape is intact, so the loop above is not
-  // passing for the wrong reason.
-  status.effectiveConfig.approval.promptChannel = { state: 'disabled', detail: 'policy "never"', autoDenials: 0 }
-  assert.match(renderStatus(status), /APPROVAL NOT SATISFIABLE HERE/)
 })
 
 // ---------------------------------------------------------------------------
@@ -2532,7 +2560,7 @@ test('the workflow_set tool asks the user, writes only on an exact approval, and
     const refused = await define({
       async ask({ questions }) {
         return {
-          answers: [{ id: questions[0].id, selected: ['Keep the current gate'], custom: null }],
+          answers: [{ id: questions[0].id, selected: ['保持现状'], custom: null }],
         }
       },
     }).execute({ path: 'approval.strength', value: 'llm-only' }, exec)
@@ -2540,7 +2568,7 @@ test('the workflow_set tool asks the user, writes only on an exact approval, and
     assert.equal(refused.status, 'not-confirmed')
     assert.doesNotMatch(readFileSync(join(dir, '.dsh', 'workflow.yml'), 'utf8'), /llm-only/)
 
-    const approved = await define(answerWith('Apply this approval-gate change')).execute(
+    const approved = await define(answerWith('应用变更')).execute(
       { path: 'approval.strength', value: 'llm-only' },
       exec,
     )
@@ -2613,7 +2641,7 @@ test('a confirmation for one verification axis does not clear the approval memor
             answers: [
               {
                 id: questions[0].id,
-                selected: ['Apply this approval-gate change'],
+                selected: ['应用变更'],
                 custom: null,
               },
             ],
@@ -2679,7 +2707,7 @@ test('a dry run of a gate-setting write validates without confirmation or a writ
   }
 })
 
-test('the safety-gate question names the requested value and the maxRounds delta', async () => {
+test('the safety-gate question shows only changed axes, compactly', async () => {
   const dir = makeProject('tier: standard\n')
   try {
     const seen = []
@@ -2692,7 +2720,7 @@ test('the safety-gate question names the requested value and the maxRounds delta
             answers: [
               {
                 id: questions[0].id,
-                selected: ['Keep the current gate'],
+                selected: ['保持现状'],
                 custom: null,
               },
             ],
@@ -2700,15 +2728,29 @@ test('the safety-gate question names the requested value and the maxRounds delta
         },
       }),
     })
-    const result = await tool.execute(
-      { path: 'evaluator.maxRounds', value: 1 },
-      makeExec({ cwd: dir }),
-    )
+    const exec = makeExec({ cwd: dir })
+    const result = await tool.execute({ path: 'evaluator.maxRounds', value: 1 }, exec)
     assert.equal(result.ok, false)
     assert.equal(result.status, 'not-confirmed')
     assert.equal(seen.length, 1)
-    assert.match(seen[0], /requested value: 1/)
-    assert.match(seen[0], /evaluator\.maxRounds 2 -> 1/)
+    assert.match(seen[0], /evaluator\.maxRounds: 2 → 1/)
+    // The dialog needs the delta, not two copies of the whole gate, but the safety warnings
+    // must survive: a shorter dialog is not a less informed one.
+    assert.match(seen[0], /放宽安全门/)
+    assert.match(seen[0], /子代理无法替你确认/)
+    assert.doesNotMatch(seen[0], /current:|proposed:/)
+    assert.doesNotMatch(seen[0], /approval\.strength/, 'an unchanged axis must not be printed')
+    assert.doesNotMatch(seen[0], /verification\./, 'an unchanged section must not be printed')
+    assert.ok(seen[0].length < 1200, `question too long: ${seen[0].length} chars`)
+
+    // A section write must not print unchanged leaves either.
+    await tool.execute({ path: 'evaluator', value: { bar: 9, maxRounds: 2 } }, exec)
+    assert.equal(seen.length, 2)
+    assert.match(seen[1], /evaluator\.bar: 8 → 9/)
+    assert.doesNotMatch(seen[1], /maxRounds/, 'maxRounds did not change and must not be shown')
+    assert.doesNotMatch(seen[1], /approval\./, 'the approval section did not change')
+    assert.doesNotMatch(seen[1], /current:|proposed:/)
+    assert.ok(seen[1].length < 1200, `question too long: ${seen[1].length} chars`)
   } finally {
     rmSync(dir, { recursive: true, force: true })
     clearApprovalStateCache()

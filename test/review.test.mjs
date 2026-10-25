@@ -11,9 +11,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   aggregateScore,
@@ -54,6 +55,9 @@ import {
 const allAt = score =>
   DEFAULT_DIMENSIONS.map(dimension => ({ dimension, score, rationale: 'ok' }))
 
+/** The package root, for tests that assert what the shipped package contains. */
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+
 /**
  * A fake `subagents` service.
  *
@@ -76,6 +80,43 @@ function fakeSubagents({ structured, stopReason = 'completed', diagnostic, start
             stopReason,
             diagnostic,
             output: [{ type: 'text', text: structured === undefined ? '' : JSON.stringify(structured) }],
+            ...(structured === undefined ? {} : { structured }),
+          }),
+          async dispose() {
+            calls.dispose += 1
+          },
+        }
+      },
+    },
+  }
+}
+
+/**
+ * A fake `subagents` service whose children settle in the given order.
+ *
+ * The retry tests need the SECOND child to behave differently from the first — that is what
+ * distinguishes "a transient stop reason was retried and the retry was scored" from "the one
+ * child ran twice by accident". Each receipt disposes independently, so a leaked or skipped
+ * attempt is visible in `calls`.
+ */
+function sequencedSubagents({ stopReasons = ['completed'], structured, diagnostic } = {}) {
+  const calls = { start: 0, dispose: 0, requests: [] }
+  return {
+    calls,
+    service: {
+      async start(provider, request) {
+        calls.start += 1
+        calls.requests.push(request)
+        const stopReason =
+          stopReasons[Math.min(calls.start - 1, stopReasons.length - 1)] ?? 'completed'
+        return {
+          id: `child-${calls.start}`,
+          result: Promise.resolve({
+            stopReason,
+            diagnostic: stopReason === 'completed' ? undefined : diagnostic,
+            output: [
+              { type: 'text', text: structured === undefined ? '' : JSON.stringify(structured) },
+            ],
             ...(structured === undefined ? {} : { structured }),
           }),
           async dispose() {
@@ -514,13 +555,186 @@ test('runReview refuses without a calling agent', async () => {
 
 test('a child that did not complete is never scored as a pass', async () => {
   const { calls, service } = fakeSubagents({ stopReason: 'aborted', diagnostic: 'killed by user' })
-  const outcome = await runReview({ ...baseRun, subagents: service })
+  const outcome = await runReview({ ...baseRun, subagents: service, retryDelayMs: 0 })
 
   assert.equal(outcome.passed, false)
   assert.equal(outcome.status, 'incomplete')
   assert.match(outcome.reason, /aborted/)
   assert.match(outcome.detail, /killed by user/)
-  assert.equal(calls.dispose, 1, 'a failed run must still be released')
+  // UPDATED, NOT RELAXED. `aborted` is exactly the stop reason the bounded retry exists
+  // for, so the old "dispose 1" assertion now describes the pre-retry behaviour. Two
+  // attempts must mean two children and two disposals.
+  assert.equal(calls.start, 2, 'an aborted reviewer is retried once')
+  assert.equal(calls.dispose, 2, 'a failed run must still be released, on every attempt')
+  assert.equal(outcome.attempts, 2)
+  assert.equal(outcome.maxAttempts, 2)
+  assert.equal(outcome.stopReason, 'aborted')
+  assert.equal(outcome.priorStopReason, 'aborted')
+})
+
+// ---------------------------------------------------------------------------
+// bounded retry for a child-side failure
+// ---------------------------------------------------------------------------
+//
+// The retry is deliberately NARROW. These tests pin both halves: the two child-side stop
+// reasons are retried (so one aborted child does not cost the caller a whole review round),
+// and every deterministic failure is NOT (so a retry cannot double the cost of the same wall).
+
+test('an aborted reviewer is retried once, and the completed retry is scored', async () => {
+  const { calls, service } = sequencedSubagents({
+    stopReasons: ['aborted', 'completed'],
+    structured: { perDimension: allAt(9), issues: [] },
+  })
+  const outcome = await runReview({ ...baseRun, subagents: service, retryDelayMs: 0 })
+
+  assert.equal(outcome.ok, true)
+  assert.equal(outcome.status, 'reviewed')
+  assert.equal(outcome.passed, true, 'only the completed child may be scored')
+  assert.equal(outcome.verdict.overall, 9)
+  assert.equal(outcome.attempts, 2)
+  assert.equal(outcome.maxAttempts, 2)
+  assert.equal(outcome.stopReason, 'completed')
+  assert.equal(outcome.priorStopReason, 'aborted')
+  assert.equal(calls.start, 2, 'exactly one retry')
+  assert.equal(calls.dispose, 2, 'the failed child is released before the retry is scored')
+
+  // The first line stays PASS, and the retry is visible without having to know that
+  // `attempts` exists.
+  const text = renderReview(outcome)
+  assert.match(text, /^PASS — independent review round 1\/3/m)
+  assert.match(text, /attempt 2\/2 \(prior stopReason: aborted\)/)
+})
+
+test('a retry that also fails stays incomplete and never becomes a verdict', async () => {
+  const { calls, service } = sequencedSubagents({
+    stopReasons: ['aborted', 'aborted'],
+    diagnostic: 'killed by user',
+  })
+  const outcome = await runReview({ ...baseRun, subagents: service, retryDelayMs: 0 })
+
+  assert.equal(outcome.ok, false)
+  assert.equal(outcome.passed, false)
+  assert.equal(outcome.status, 'incomplete')
+  assert.equal(outcome.review, null, 'a failed child is never normalised into findings')
+  assert.equal(outcome.verdict, null)
+  assert.equal(outcome.attempts, 2)
+  assert.equal(outcome.stopReason, 'aborted', 'the last terminal reason is reported')
+  assert.equal(outcome.priorStopReason, 'aborted')
+  assert.equal(calls.start, 2)
+  assert.equal(calls.dispose, 2)
+})
+
+test('a completed reviewer is never retried', async () => {
+  const { calls, service } = sequencedSubagents({
+    stopReasons: ['completed', 'completed'],
+    structured: { perDimension: allAt(9), issues: [] },
+  })
+  const outcome = await runReview({ ...baseRun, subagents: service })
+
+  assert.equal(outcome.status, 'reviewed')
+  assert.equal(outcome.attempts, 1)
+  assert.equal(outcome.stopReason, 'completed')
+  assert.equal(calls.start, 1, 'a completed run is the answer, not a failure to retry')
+  assert.equal(calls.dispose, 1)
+
+  // A first-try verdict must not gain the retry line: it would be noise on every review.
+  assert.doesNotMatch(renderReview(outcome), /^attempt /m)
+})
+
+test('a start failure or a timeout is not retried', async () => {
+  // Deterministic for the same request: a second child would meet the same wall, and the
+  // `attempts` count is the assertion that it did not.
+  const startFailure = fakeSubagents({ startThrows: new Error('no such provider') })
+  const failed = await runReview({
+    ...baseRun,
+    subagents: startFailure.service,
+    retryDelayMs: 0,
+  })
+  assert.equal(failed.status, 'unavailable')
+  assert.equal(failed.attempts, 1)
+  assert.equal(failed.stopReason, null, 'a start that never ran produced no terminal reason')
+  assert.equal(startFailure.calls.start, 1, 'a start failure is final')
+
+  let starts = 0
+  const timed = {
+    start: () => {
+      starts += 1
+      return new Promise(() => {})
+    },
+  }
+  const timedOut = await runReview({
+    ...baseRun,
+    subagents: timed,
+    timeoutMs: 20,
+    retryDelayMs: 0,
+  })
+  assert.equal(timedOut.status, 'incomplete')
+  assert.equal(timedOut.attempts, 1)
+  assert.equal(timedOut.stopReason, null)
+  assert.equal(starts, 1, 'a timeout is still one attempt')
+})
+
+test('a cancellation before the retry starts no second child and does not count attempt 2', async () => {
+  const controller = new AbortController()
+  const { calls, service } = sequencedSubagents({
+    stopReasons: ['aborted', 'completed'],
+    structured: { perDimension: allAt(9), issues: [] },
+  })
+  const start = service.start
+  service.start = async (...args) => {
+    const receipt = await start(...args)
+    if (calls.start === 1) controller.abort()
+    return receipt
+  }
+
+  const outcome = await runReview({
+    ...baseRun,
+    subagents: service,
+    signal: controller.signal,
+    retryDelayMs: 0,
+  })
+
+  assert.equal(outcome.status, 'incomplete')
+  assert.equal(calls.start, 1, 'the cancelled retry must not start a child')
+  assert.equal(outcome.attempts, 1, 'only the child that actually started counts')
+  assert.equal(outcome.priorStopReason, null, 'no retry started, so no prior reason is claimed')
+})
+
+test('a cancellation during the retry backoff still starts no second child', async () => {
+  const controller = new AbortController()
+  const { calls, service } = sequencedSubagents({
+    stopReasons: ['aborted', 'completed'],
+    structured: { perDimension: allAt(9), issues: [] },
+  })
+  setTimeout(() => controller.abort(), 15)
+
+  const outcome = await runReview({
+    ...baseRun,
+    subagents: service,
+    signal: controller.signal,
+    retryDelayMs: 80,
+  })
+
+  assert.equal(outcome.status, 'incomplete')
+  assert.equal(calls.start, 1, 'the second check after the backoff must see the cancellation')
+  assert.equal(outcome.attempts, 1)
+})
+
+test('renderReview shows the attempt record for a retried incomplete review', async () => {
+  const { service } = sequencedSubagents({
+    stopReasons: ['aborted', 'error'],
+    diagnostic: 'provider dropped the activation',
+  })
+  const outcome = await runReview({ ...baseRun, subagents: service, retryDelayMs: 0 })
+  const text = renderReview(outcome)
+
+  // The refusal-path contract is unchanged: the first line still says the review did not
+  // run. The attempt record is an additional line, not a new headline, and the reason line
+  // still carries the final stop reason.
+  assert.match(text, /^independent review did not run:/m)
+  assert.match(text, /attempt 2\/2 \(prior stopReason: aborted\)/)
+  assert.match(text, /stopReason: error/)
+  assert.match(text, /\(status: incomplete\)/)
 })
 
 test('runReview reports a start failure instead of throwing', async () => {
@@ -1573,6 +1787,137 @@ test('a classification with an unusable entry is ignored as a whole, not half-ap
   assert.equal(good.classification.allowUnknownSources, true)
 })
 
+test('a project can declare data non-executable, and only then is it docs', () => {
+  // (a) THE EXPLICIT OPT-IN. `data/report.json` is executable by extension — a `.json` can decide
+  // behaviour — so with no declaration it is an unclassified source and fails closed. The
+  // declaration says the tree is data, and only a NON-CODE file may take it.
+  const declared = classifyChange({
+    changedFiles: ['data/report.json'],
+    classification: { nonExecutable: ['data/**'] },
+    selfProject: false,
+  })
+  assert.equal(declared.class, 'docs')
+  assert.match(declared.reasons.join(' '), /non-executable/)
+
+  // The declaration is matched after path normalisation, so the same pattern works for a Windows
+  // spelling on any OS (the suite must not depend on which separator the host uses).
+  const windowsSpelling = classifyChange({
+    changedFiles: ['data\\report.json'],
+    classification: { nonExecutable: ['data/**'] },
+    selfProject: false,
+  })
+  assert.equal(windowsSpelling.class, 'docs')
+
+  // (b) FAIL-CLOSED WITHOUT THE DECLARATION, and this is the PRE-EXISTING grading: an unclassified
+  // `.json` source is security. The new list must be an opt-in, never a new default.
+  const undeclared = classifyChange({
+    changedFiles: ['data/report.json'],
+    classification: { sources: [], security: [], ui: [] },
+    selfProject: false,
+  })
+  assert.equal(undeclared.class, 'security')
+  assert.deepEqual(undeclared.unknown, ['data/report.json'])
+
+  // (c) NON-EXECUTABLE MUST NOT MAKE CODE DATA. `.js` under the declared tree still matches the
+  // pattern, but it is source code, so it falls through to the unclassified-source rule and is
+  // security — a data declaration cannot launder executable behaviour.
+  const code = classifyChange({
+    changedFiles: ['data/tool.js'],
+    classification: { nonExecutable: ['data/**'] },
+    selfProject: false,
+  })
+  assert.equal(code.class, 'security')
+
+  // (f) A DECLARED SOURCE IS NEVER DEMOTED. `sources` says the file can change behaviour;
+  // `nonExecutable` says the tree is data. Source wins, even when both patterns match.
+  const sourceWins = classifyChange({
+    changedFiles: ['data/report.json'],
+    classification: { sources: ['data/**'], nonExecutable: ['data/**'] },
+    selfProject: false,
+  })
+  assert.equal(sourceWins.class, 'logic')
+  const manifestWins = classifyChange({
+    changedFiles: ['package.json'],
+    classification: { sources: ['package.json'], nonExecutable: ['**'] },
+    selfProject: false,
+  })
+  assert.equal(manifestWins.class, 'logic')
+
+  // (g) PROTECTED CONFIGURATION CANNOT BE ABSORBED BY A BROAD DECLARATION. `.dsh/workflow.yml`
+  // is the project's gate, and a CI workflow runs code; `nonExecutable: ['**']` must not
+  // lower either to docs.
+  for (const changed of ['.dsh/workflow.yml', '.github/workflows/ci.yml', 'package.json']) {
+    const protectedPath = classifyChange({
+      changedFiles: [changed],
+      classification: { nonExecutable: ['**'] },
+      selfProject: false,
+    })
+    assert.equal(protectedPath.class, 'security', `${changed} must stay security`)
+  }
+})
+
+test('nonExecutable never outranks security or UI, and a bad entry is not half-applied', () => {
+  // (d) SECURITY WINS FIRST. A path named in both lists is a security surface; the data rule is
+  // reached only after the security check has continued.
+  const securityWins = classifyChange({
+    changedFiles: ['data/approval.json'],
+    classification: { security: ['data/approval.json'], nonExecutable: ['data/**'] },
+    selfProject: false,
+  })
+  assert.equal(securityWins.class, 'security')
+  assert.match(securityWins.reasons.join(' '), /decides whether a call is allowed to run/)
+
+  // UI still adds its human-check reason BEFORE the data rule: a render surface under the declared
+  // tree is not demoted to docs, because the UI rule already continued.
+  const uiWins = classifyChange({
+    changedFiles: ['data/panel.css'],
+    classification: { nonExecutable: ['data/**'] },
+    selfProject: false,
+  })
+  assert.equal(uiWins.uiTouched, true)
+  assert.match(uiWins.uiReasons.join(' '), /builds rendered output/)
+
+  // (e) AN UNUSABLE ENTRY INVALIDATES THE WHOLE CLASSIFICATION, exactly like `security: ['../bad']`.
+  // The valid `data/**` entry must not survive a bad sibling, or a typo could leave a half-applied
+  // declaration deciding verification.
+  for (const bad of ['../outside', '/abs/path', 'C:/outside']) {
+    const policy = readVerificationPolicy({ nonExecutable: ['data/**', bad] })
+    assert.equal(policy.classificationUsable, false, `${bad} must make the classification unusable`)
+    const resolution = resolveVerificationDepth({
+      declaredClass: 'docs',
+      changedFiles: ['data/report.json'],
+      policy: 'advisory',
+      classification: policy.classification,
+      classificationUsable: policy.classificationUsable,
+      classificationProblems: policy.classificationProblems,
+      selfProject: false,
+    })
+    assert.equal(resolution.derived, 'security', `${bad}: the fail-closed default must be used`)
+    assert.equal(resolution.classification, null)
+  }
+
+  // The valid form survives and is normalised like the other lists (trailing slashes stripped,
+  // lower-cased), so it is not the pattern spelling that decides usability.
+  const good = readVerificationPolicy({ nonExecutable: ['Data/', 'docs/**'] })
+  assert.equal(good.classificationUsable, true)
+  assert.deepEqual(good.classification.nonExecutable, ['data', 'docs/**'])
+
+  // The AUDIT carries the declaration too, so a reader of the review record can see why a data
+  // file resolved to docs rather than having to guess from the class name alone.
+  const resolved = resolveVerificationDepth({
+    declaredClass: 'docs',
+    changedFiles: ['data/report.json'],
+    policy: 'advisory',
+    classification: readVerificationPolicy({ nonExecutable: ['data/**'] }).classification,
+    classificationUsable: true,
+    selfProject: false,
+  })
+  const auditText = renderVerificationAudit(
+    buildVerificationAudit(resolved, { policy: 'advisory' }),
+  ).join('\n')
+  assert.match(auditText, /nonExecutable=\[data\/\*\*\]/)
+})
+
 test('the audit says "contradicted", not "CLASS REFUSED", under advisory', () => {
   const classification = {
     sources: ['dsh-bilibili-pro'],
@@ -1652,6 +1997,28 @@ test('harness selection follows the depth, not a hardcoded list', () => {
   for (const harness of discovered.harnesses) {
     assert.ok(harness.targets.length > 0, `${harness.name} must declare at least one target`)
   }
+})
+
+test('the shipped package includes tooling/, so an installed copy can read the harness table', () => {
+  // An installed copy that lacks `tooling/` reports `mutation harness table UNREADABLE` — the
+  // honest behaviour for a directory that is genuinely absent. The fix has to be that the
+  // package SHIPS the table `review.js` keys on, not that the reader pretends a missing
+  // directory means "no harness covers these files". `npm pack` is deliberately not run here:
+  // the regression is the `files` entry plus a resolution against the real directory.
+  const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
+  assert.ok(Array.isArray(pkg.files), 'package.json must declare a files list')
+  assert.ok(pkg.files.includes('tooling'), 'tooling/ must be shipped in the installed package')
+
+  const plan = harnessesForDepth({
+    depth: VERIFICATION_DEPTHS.HARNESSES,
+    files: ['lib/approval.js'],
+    tooling: join(repoRoot, 'tooling'),
+  })
+  assert.equal(plan.unreadable, false, 'the shipped harness table must be readable')
+  assert.ok(
+    plan.required.includes('mutation-check-approval.mjs'),
+    `the approval harness must be resolved; got ${plan.required.join(', ') || '(none)'}`,
+  )
 })
 
 test('an unreadable harness table is carried into the audit, not read as "no coverage"', () => {

@@ -403,6 +403,11 @@ test('the static guidance does not assert a project policy it never read', () =>
   const text = renderWorkflowGuidance(resolveConfig({}))
   assert.doesNotMatch(text, /This project has verification\.policy=off/)
   assert.match(text, /PROJECT-SCOPED/)
+  // The COMMIT rule is stated accurately: recipe docs adds only BUILD -> EVALUATE, no recipe
+  // adds BUILD -> COMMIT, and COMMIT itself is not review-gated.
+  assert.match(text, /recipe docs adds only that edge/)
+  assert.match(text, /COMMIT itself is not review-gated/)
+  assert.doesNotMatch(text, /no recipe reaches COMMIT without it/)
 })
 
 test('the verification writer refuses every value its reader refuses', () => {
@@ -412,6 +417,9 @@ test('the verification writer refuses every value its reader refuses', () => {
     [['verification', 'report'], 'yes'],
     [['verification', 'allowUnknownSources'], 'yes'],
     [['verification', 'sources'], ['../bad']],
+    // The data declaration follows the same pattern rule: an absolute/`..` entry is refused by
+    // the writer here, before it can invalidate (or silently shape) a project's classification.
+    [['verification', 'nonExecutable'], ['../bad']],
     [['verification', 'report', 'enabled'], true],
     [['verification', 'policy', 'extra'], 'off'],
     [['approval', 'strength', 'extra'], 'llm-only'],
@@ -425,6 +433,7 @@ test('the verification writer refuses every value its reader refuses', () => {
   }
   assert.equal(validateSettingValue(['verification', 'policy'], 'advisory'), null)
   assert.equal(validateSettingValue(['verification', 'confirmation'], 'never'), null)
+  assert.equal(validateSettingValue(['verification', 'nonExecutable'], ['data/**']), null)
   assert.equal(
     validateSettingValue(['verification'], { policy: 'off', sources: ['lib'], ui: ['lib/client.js'] }),
     null,
@@ -470,6 +479,45 @@ test('status uses the strict verification fallback when the project file has par
   }
 })
 
+test('status shows the nonExecutable declaration that resolved a data file to docs', () => {
+  // THE DECLARATION IS THE REASON, so it has to be visible: a report that prints `class "docs"`
+  // for a `.json` without showing `nonExecutable` cannot be distinguished from a misclassification,
+  // and the whole point of the list is that a reader can audit it. A project that declares ONLY
+  // nonExecutable must still render the classification line, which is why the renderer's
+  // non-empty test includes this list.
+  const dir = makeProject('verification:\n  policy: advisory\n  nonExecutable:\n    - data/**\n')
+  try {
+    const status = buildStatus({
+      exec: execFor(dir),
+      config: resolveConfig({}),
+      services,
+      declaredClass: 'docs',
+      changedFiles: ['data/report.json'],
+    })
+    const text = renderStatus(status)
+    assert.match(text, /project classification: .*nonExecutable=\[data\/\*\*\]/)
+    assert.match(text, /resolved: class "docs"/)
+    assert.equal(status.effectiveConfig.verification.resolution.derived, 'docs')
+    // The fail-closed sibling is still visible in the same status shape when nothing is declared.
+    const undeclared = makeProject('tier: standard\n')
+    try {
+      const plain = buildStatus({
+        exec: execFor(undeclared),
+        config: resolveConfig({}),
+        services,
+        declaredClass: 'docs',
+        changedFiles: ['data/report.json'],
+      })
+      assert.equal(plain.effectiveConfig.verification.resolution.derived, 'security')
+      assert.doesNotMatch(renderStatus(plain), /nonExecutable=/)
+    } finally {
+      rmSync(undeclared, { recursive: true, force: true })
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('a full init plus a legitimate section write leaves a usable, renderable project', async () => {
   const dir = makeProject(undefined)
   try {
@@ -497,7 +545,7 @@ test('a full init plus a legitimate section write leaves a usable, renderable pr
             answers: [
               {
                 id: questions[0].id,
-                selected: ['Apply this approval-gate change'],
+                selected: ['应用变更'],
                 custom: null,
               },
             ],

@@ -36,6 +36,7 @@ import {
   applyReviewOutcome,
   buildBootstrap,
   fingerprint,
+  reviewFreshness,
   emptyFeatures,
   readState,
   writeState,
@@ -44,7 +45,7 @@ import {
   WORKFLOW_STATE_RELATIVE_PATH,
   FEATURES_RELATIVE_PATH,
 } from '../lib/advance.js'
-import { buildAdvanceToolDefinition, buildReviewToolDefinition, buildToolDefinition } from '../lib/tools.js'
+import { buildAdvanceToolDefinition, buildReviewToolDefinition, buildToolDefinition, renderStatus } from '../lib/tools.js'
 import { resolveConfig } from '../lib/config.js'
 import { reviewOutcomeKey } from '../lib/work-unit.js'
 
@@ -366,6 +367,198 @@ test('a diff folded into the fingerprint changes it', () => {
   const dir = makeProject()
   try {
     assert.notEqual(fingerprint(dir, [], 'diff one'), fingerprint(dir, [], 'diff two'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+/** A feature carrying a review evidence row shaped exactly like record-review writes it. */
+function reviewedFeature(dir, files, overrides = {}) {
+  return feature('F001', 1, {
+    passes: true,
+    evidence: [
+      {
+        type: 'review',
+        at: '2026-01-01T00:00:00.000Z',
+        round: 1,
+        overall: 9,
+        passed: true,
+        // The full digest still binds files + diff; the file-only digest is the recheckable half.
+        fingerprint: fingerprint(dir, files, ''),
+        files_fingerprint: fingerprint(dir, files, '', ''),
+        diff_hash: 'a'.repeat(64),
+        files,
+        ...overrides,
+      },
+    ],
+  })
+}
+
+test('reviewFreshness rechecks the reviewed files and flips to stale after a one-byte edit', () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'let x = 1\n', 'utf8')
+    const features = { features: [reviewedFeature(dir, ['a.js'])] }
+
+    const fresh = reviewFreshness(dir, undefined, features)
+    assert.equal(fresh.state, 'fresh')
+    assert.deepEqual(fresh.reviewedFiles, ['a.js'])
+    assert.equal(fresh.currentFileFingerprint, fresh.reviewedFileFingerprint)
+
+    writeFileSync(join(dir, 'a.js'), 'let x = 2\n', 'utf8')
+    const stale = reviewFreshness(dir, undefined, features)
+    assert.equal(stale.state, 'stale')
+    assert.notEqual(stale.currentFileFingerprint, stale.reviewedFileFingerprint)
+    assert.match(stale.reason, /reviewed files changed/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('an absolute forward-slash reviewed path is actually re-read, not a constant', () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'let x = 1\n', 'utf8')
+    const absolute = `${dir.replace(/\\/g, '/')}/a.js`
+    const features = {
+      features: [
+        feature('F001', 1, {
+          evidence: [
+            {
+              type: 'review',
+              at: '2026-01-01T00:00:00.000Z',
+              passed: true,
+              files: [absolute],
+              files_fingerprint: fingerprint(dir, [absolute], '', ''),
+              fingerprint: fingerprint(dir, [absolute], '', ''),
+            },
+          ],
+        }),
+      ],
+    }
+    assert.equal(reviewFreshness(dir, undefined, features).state, 'fresh')
+    writeFileSync(join(dir, 'a.js'), 'let x = 2\n', 'utf8')
+    assert.equal(
+      reviewFreshness(dir, undefined, features).state,
+      'stale',
+      'a forward-slash absolute path must resolve to the real file',
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a review that recorded an unreadable file is UNKNOWN, never fresh', () => {
+  const dir = makeProject()
+  try {
+    const features = {
+      features: [
+        feature('F001', 1, {
+          evidence: [
+            {
+              type: 'review',
+              at: '2026-01-01T00:00:00.000Z',
+              passed: true,
+              files: ['does-not-exist.js'],
+              files_fingerprint: fingerprint(dir, ['does-not-exist.js'], '', ''),
+              unreadable_files: ['does-not-exist.js'],
+            },
+          ],
+        }),
+      ],
+    }
+    assert.equal(reviewFreshness(dir, undefined, features).state, 'unknown')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('reviewFreshness calls legacy and diff-only evidence unknown, never fresh', () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'a', 'utf8')
+    // Legacy: files + full fingerprint only, from before the recheck fields existed.
+    const legacy = {
+      features: [
+        feature('F001', 1, {
+          passes: true,
+          evidence: [{ type: 'review', at: 't', passed: true, fingerprint: 'abc', files: ['a.js'] }],
+        }),
+      ],
+    }
+    assert.equal(reviewFreshness(dir, undefined, legacy).state, 'unknown')
+
+    // A diff-only review has no file list to recompute; an empty list must not look fresh.
+    const diffOnly = {
+      features: [
+        feature('F001', 1, {
+          evidence: [{ type: 'review', files: [], files_fingerprint: 'x', fingerprint: 'y' }],
+        }),
+      ],
+    }
+    assert.equal(reviewFreshness(dir, undefined, diffOnly).state, 'unknown')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('hand-edited deletion evidence that is not a list is UNKNOWN, never fresh', () => {
+  // A record whose only evidence is an unusable deletion list must not borrow the deletion-only
+  // path to a false FRESH, and must not be explained as a diff-only review it is not.
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'a', 'utf8')
+    const features = {
+      features: [
+        feature('F001', 1, {
+          passes: true,
+          evidence: [
+            {
+              type: 'review',
+              at: '2026-01-01T00:00:00.000Z',
+              passed: true,
+              files: [],
+              files_fingerprint: fingerprint(dir, [], ''),
+              fingerprint: 'full',
+              git_cross_check: { deleted: 'lib/gone.js', deletedTotal: 1 },
+            },
+          ],
+        }),
+      ],
+    }
+    const result = reviewFreshness(dir, undefined, features)
+    assert.equal(result.state, 'unknown')
+    assert.equal(result.cause, 'malformed')
+    assert.doesNotMatch(result.reason, /no reviewed file list/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('reviewFreshness degrades malformed evidence to unknown without throwing', () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'a', 'utf8')
+    const malformed = [
+      { features: 'not an object' },
+      { features: [{ id: 'F001', evidence: 'not an array' }] },
+      { features: [{ id: 'F001', evidence: [{ type: 'review', files: 'a.js', files_fingerprint: 7 }] }] },
+      { features: [{ id: 'F001', evidence: [{ type: 'review', files: ['a.js'], files_fingerprint: '' }] }] },
+      { features: [{ id: 'F001', evidence: [{ type: 'review', files: [7, null], files_fingerprint: 'x' }] }] },
+    ]
+    for (const features of malformed) {
+      let result
+      assert.doesNotThrow(() => {
+        result = reviewFreshness(dir, undefined, features)
+      })
+      assert.ok(
+        result.state === 'unknown' || result.state === 'none',
+        `malformed input must not claim fresh/stale: ${JSON.stringify(result)}`,
+      )
+    }
+    assert.equal(reviewFreshness(dir, undefined, { features: [{ id: 'F001', evidence: 'x' }] }).state, 'unknown')
+    assert.equal(reviewFreshness(dir, undefined, { features: [feature('F001', 1)] }).state, 'none')
+    assert.equal(reviewFreshness('/definitely/not/here', undefined, { features: [feature('F001', 1)] }).state, 'none')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -927,6 +1120,307 @@ test('a genuine edit after the review is still refused, and the message says so'
     assert.equal(applied.ok, false, 'a real edit after approval must invalidate it')
     assert.match(applied.reason, /does not cover the current artefact/)
     assert.equal(readFeatures(dir).features.features[0].passes, false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a recorded PASS carries recheck fields and stays fresh for status and COMMIT/HANDOFF', async () => {
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const def = buildAdvanceToolDefinition(options)
+    const { reviewDef, reviewExec } = reviewRig(options, execFor(dir))
+
+    writeFileSync(join(dir, 'a.js'), 'let x = 1\n', 'utf8')
+    await def.execute(
+      { action: 'advance', to: 'PLAN', features: [{ id: 'F001', description: 'x', steps: ['a'], priority: 1 }] },
+      execFor(dir),
+    )
+    await def.execute({ action: 'pick' }, execFor(dir))
+    const review = await reviewDef.execute({ feature: 'x', changed_files: ['a.js'] }, reviewExec)
+    assert.equal(review.passed, true)
+    const applied = await def.execute({ action: 'record-review', feature_id: 'F001' }, execFor(dir))
+    assert.equal(applied.ok, true, JSON.stringify(applied))
+
+    const row = readFeatures(dir).features.features[0].evidence.at(-1)
+    assert.deepEqual(row.files, ['a.js'])
+    assert.equal(typeof row.fingerprint, 'string', 'the full fingerprint stays in the evidence')
+    assert.equal(row.files_fingerprint, fingerprint(dir, ['a.js'], '', ''))
+    assert.equal(typeof row.diff_hash, 'string')
+    assert.equal(row.diff_hash.length, 64, 'the reviewed diff is carried as a hash, not duplicated')
+
+    const status = await buildToolDefinition(options).execute({}, execFor(dir))
+    assert.equal(status.reviewFreshness.state, 'fresh')
+    assert.match(renderStatus(status), /review freshness: fresh/)
+    // The advance surface reports the same freshness as status; a driver should not have to
+    // wait for the transition refusal to learn that the evidence is stale.
+    const advanceStatus = await def.execute({ action: 'status' }, execFor(dir))
+    assert.equal(advanceStatus.reviewFreshness.state, 'fresh')
+
+    const state = readState(dir).state
+    writeState(dir, { ...state, phase: 'EVALUATE', feature_id: 'F001', bootstrapped: true })
+    const commit = await def.execute({ action: 'advance', to: 'COMMIT' }, execFor(dir))
+    assert.equal(commit.ok, true, JSON.stringify(commit))
+    assert.equal(commit.reviewFreshness.state, 'fresh')
+    const handoff = await def.execute({ action: 'advance', to: 'HANDOFF' }, execFor(dir))
+    assert.equal(handoff.ok, true, JSON.stringify(handoff))
+    assert.equal(handoff.reviewFreshness.state, 'fresh')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('an edit after the recorded PASS makes status stale and refuses COMMIT and HANDOFF', async () => {
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const def = buildAdvanceToolDefinition(options)
+    const { reviewDef, reviewExec } = reviewRig(options, execFor(dir))
+
+    writeFileSync(join(dir, 'a.js'), 'let x = 1\n', 'utf8')
+    await def.execute(
+      { action: 'advance', to: 'PLAN', features: [{ id: 'F001', description: 'x', steps: ['a'], priority: 1 }] },
+      execFor(dir),
+    )
+    await def.execute({ action: 'pick' }, execFor(dir))
+    await reviewDef.execute({ feature: 'x', changed_files: ['a.js'] }, reviewExec)
+    const applied = await def.execute({ action: 'record-review', feature_id: 'F001' }, execFor(dir))
+    assert.equal(applied.ok, true, JSON.stringify(applied))
+
+    const reviewed = readFeatures(dir).features.features[0].evidence.at(-1).files_fingerprint
+    writeFileSync(join(dir, 'a.js'), 'let x = 2\n', 'utf8')
+    const current = fingerprint(dir, ['a.js'], '', '')
+
+    const staleStatus = await buildToolDefinition(options).execute({}, execFor(dir))
+    assert.equal(staleStatus.reviewFreshness.state, 'stale')
+    assert.match(renderStatus(staleStatus), /review freshness: STALE/)
+
+    const state = readState(dir).state
+    writeState(dir, { ...state, phase: 'EVALUATE', feature_id: 'F001', bootstrapped: true })
+    const commit = await def.execute({ action: 'advance', to: 'COMMIT' }, execFor(dir))
+    assert.equal(commit.ok, false, 'a stale PASS must not reach COMMIT')
+    assert.equal(commit.status, 'stale-review')
+    assert.ok(commit.reason.includes(reviewed), 'the refusal names the reviewed fingerprint')
+    assert.ok(commit.reason.includes(current), 'the refusal names the current fingerprint')
+    assert.equal(readState(dir).state.phase, 'EVALUATE', 'a refused move must not advance the phase')
+
+    writeState(dir, { ...readState(dir).state, phase: 'COMMIT' })
+    const handoff = await def.execute({ action: 'advance', to: 'HANDOFF' }, execFor(dir))
+    assert.equal(handoff.ok, false, 'a stale PASS must not reach HANDOFF either')
+    assert.equal(handoff.status, 'stale-review')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('HANDOFF refuses when an earlier reviewed feature is stale, not only the selected one', async () => {
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const def = buildAdvanceToolDefinition(options)
+    const { reviewDef, reviewExec } = reviewRig(options, execFor(dir))
+
+    writeFileSync(join(dir, 'a.js'), 'let a = 1\n', 'utf8')
+    writeFileSync(join(dir, 'b.js'), 'let b = 1\n', 'utf8')
+    await def.execute(
+      {
+        action: 'advance',
+        to: 'PLAN',
+        features: [
+          { id: 'F001', description: 'a', steps: ['a'], priority: 2 },
+          { id: 'F002', description: 'b', steps: ['b'], priority: 1 },
+        ],
+      },
+      execFor(dir),
+    )
+
+    // F001 is reviewed and committed; F002 becomes the selected feature.
+    await def.execute({ action: 'pick' }, execFor(dir))
+    await reviewDef.execute({ feature: 'a', changed_files: ['a.js'] }, reviewExec)
+    assert.equal((await def.execute({ action: 'record-review', feature_id: 'F001' }, execFor(dir))).ok, true)
+    writeState(dir, { ...readState(dir).state, phase: 'EVALUATE' })
+    assert.equal((await def.execute({ action: 'advance', to: 'COMMIT' }, execFor(dir))).ok, true)
+    writeState(dir, { ...readState(dir).state, phase: 'PICK', feature_id: null })
+    assert.equal((await def.execute({ action: 'pick' }, execFor(dir))).feature.id, 'F002')
+    await reviewDef.execute({ feature: 'b', changed_files: ['b.js'] }, reviewExec)
+    assert.equal((await def.execute({ action: 'record-review', feature_id: 'F002' }, execFor(dir))).ok, true)
+    writeState(dir, { ...readState(dir).state, phase: 'EVALUATE' })
+    assert.equal((await def.execute({ action: 'advance', to: 'COMMIT' }, execFor(dir))).ok, true)
+    writeState(dir, { ...readState(dir).state, phase: 'COMMIT', feature_id: 'F002' })
+
+    // Editing F001's reviewed file after its COMMIT must surface even though F002 is the
+    // selected feature and its own review is fresh.
+    writeFileSync(join(dir, 'a.js'), 'let a = 2\n', 'utf8')
+    const status = await buildToolDefinition(options).execute({}, execFor(dir))
+    assert.equal(status.reviewFreshness.state, 'stale')
+    assert.match(renderStatus(status), /STALE for F001/)
+    assert.doesNotMatch(renderStatus(status), /STALE for F002/)
+
+    const handoff = await def.execute({ action: 'advance', to: 'HANDOFF' }, execFor(dir))
+    assert.equal(handoff.ok, false, 'a stale earlier feature must refuse HANDOFF')
+    assert.equal(handoff.status, 'stale-review')
+    assert.deepEqual(handoff.staleFeatures, ['F001'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a stale review with no selected feature still refuses COMMIT', async () => {
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const def = buildAdvanceToolDefinition(options)
+    const { reviewDef, reviewExec } = reviewRig(options, execFor(dir))
+
+    writeFileSync(join(dir, 'a.js'), 'let a = 1\n', 'utf8')
+    await def.execute(
+      { action: 'advance', to: 'PLAN', features: [{ id: 'F001', description: 'a', steps: ['a'], priority: 1 }] },
+      execFor(dir),
+    )
+    // record-review accepts an explicit feature id while state.feature_id is still null.
+    await reviewDef.execute({ feature: 'a', changed_files: ['a.js'] }, reviewExec)
+    assert.equal((await def.execute({ action: 'record-review', feature_id: 'F001' }, execFor(dir))).ok, true)
+    writeState(dir, { ...readState(dir).state, phase: 'EVALUATE', feature_id: null })
+    writeFileSync(join(dir, 'a.js'), 'let a = 2\n', 'utf8')
+
+    const commit = await def.execute({ action: 'advance', to: 'COMMIT' }, execFor(dir))
+    assert.equal(commit.ok, false, 'COMMIT must inspect every reviewed feature even with no selection')
+    assert.equal(commit.status, 'stale-review')
+    assert.deepEqual(commit.staleFeatures, ['F001'])
+    assert.equal(readState(dir).state.phase, 'EVALUATE')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a corrupt FEATURES.json is UNKNOWN, not silently none', async () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, '.dsh', 'FEATURES.json'), '{ "features": [', 'utf8')
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const status = await buildToolDefinition(options).execute({}, execFor(dir))
+    assert.equal(status.reviewFreshness.state, 'unknown')
+    assert.match(renderStatus(status), /review freshness: UNKNOWN/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('corrupt FEATURES and WORKFLOW evidence is UNKNOWN on advance and refuses COMMIT', async () => {
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const def = buildAdvanceToolDefinition(options)
+
+    writeFileSync(join(dir, '.dsh', 'FEATURES.json'), '{ "features": [', 'utf8')
+    writeState(dir, { ...readState(dir).state, phase: 'EVALUATE', feature_id: 'F001' })
+
+    const status = await def.execute({ action: 'status' }, execFor(dir))
+    assert.equal(status.reviewFreshness.state, 'unknown')
+    const commit = await def.execute({ action: 'advance', to: 'COMMIT' }, execFor(dir))
+    assert.equal(commit.ok, false)
+    assert.equal(commit.status, 'unknown-review-evidence')
+    assert.equal(commit.reviewFreshness.state, 'unknown')
+
+    // The same must hold for an unreadable state file: a corrupt WORKFLOW.json cannot be
+    // read as "no reviews" or as a fresh project.
+    writeFileSync(join(dir, '.dsh', 'WORKFLOW.json'), '{"phase":"NOT_A_PHASE","history":[]}', 'utf8')
+    const corruptState = await def.execute({ action: 'status' }, execFor(dir))
+    assert.equal(corruptState.reviewFreshness.state, 'unknown')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a fresh FAILED review says FAIL, not a passing fresh', async () => {
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const def = buildAdvanceToolDefinition(options)
+    const { reviewDef, reviewExec } = reviewRig(options, execFor(dir), 5)
+
+    writeFileSync(join(dir, 'a.js'), 'let a = 1\n', 'utf8')
+    await def.execute(
+      { action: 'advance', to: 'PLAN', features: [{ id: 'F001', description: 'a', steps: ['a'], priority: 1 }] },
+      execFor(dir),
+    )
+    await def.execute({ action: 'pick' }, execFor(dir))
+    const review = await reviewDef.execute({ feature: 'a', changed_files: ['a.js'] }, reviewExec)
+    assert.equal(review.passed, false)
+    await def.execute({ action: 'record-review', feature_id: 'F001' }, execFor(dir))
+
+    const status = await buildToolDefinition(options).execute({}, execFor(dir))
+    assert.equal(status.reviewFreshness.state, 'fresh')
+    assert.match(renderStatus(status), /last verdict FAIL/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('legacy evidence is reported unknown by status and does not block COMMIT', async () => {
+  const dir = makeProject({
+    features: {
+      features: [
+        feature('F001', 1, {
+          passes: true,
+          evidence: [
+            {
+              type: 'review',
+              at: '2020-01-01T00:00:00.000Z',
+              passed: true,
+              fingerprint: 'legacy-digest',
+              files: ['a.js'],
+            },
+          ],
+        }),
+      ],
+    },
+  })
+  try {
+    writeFileSync(join(dir, 'a.js'), 'a', 'utf8')
+    writeState(dir, {
+      ...readState(dir).state,
+      phase: 'EVALUATE',
+      feature_id: 'F001',
+      bootstrapped: true,
+    })
+
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const status = await buildToolDefinition(options).execute({}, execFor(dir))
+    assert.equal(status.reviewFreshness.state, 'unknown', 'legacy evidence must never look fresh')
+    assert.match(renderStatus(status), /review freshness: UNKNOWN/)
+
+    const commit = await buildAdvanceToolDefinition(options).execute(
+      { action: 'advance', to: 'COMMIT' },
+      execFor(dir),
+    )
+    assert.equal(commit.ok, true, JSON.stringify(commit))
+    assert.equal(commit.reviewFreshness.state, 'unknown', 'unknown is reported, not silently treated as fresh')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a malformed evidence row cannot crash status, its renderer, or the advance check', async () => {
+  const dir = makeProject({
+    features: { features: [{ id: 'F001', evidence: 'not an array', passes: true }] },
+  })
+  try {
+    writeFileSync(join(dir, 'a.js'), 'a', 'utf8')
+    writeState(dir, { ...readState(dir).state, phase: 'EVALUATE', feature_id: 'F001', bootstrapped: true })
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+
+    const status = await buildToolDefinition(options).execute({}, execFor(dir))
+    assert.equal(status.reviewFreshness.state, 'unknown')
+    assert.doesNotThrow(() => renderStatus(status))
+
+    const commit = await buildAdvanceToolDefinition(options).execute(
+      { action: 'advance', to: 'COMMIT' },
+      execFor(dir),
+    )
+    assert.equal(commit.ok, true, JSON.stringify(commit))
+    assert.equal(commit.reviewFreshness.state, 'unknown')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
