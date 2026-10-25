@@ -119,8 +119,11 @@ labelled it "reviewer-side data loss, not a defect in the author's change" — t
 What the measurements showed (Node v24.18.0, Windows): a review child inherits the **parent's**
 working directory and file policy — a `cwd` in the spawn request does not move its sandbox root, and a
 write into the real project still succeeds. A plugin cannot make a child it does not control
-read-only. `lstat` reports a junction as an ordinary directory, `realpathSync` leaves it unresolved,
-and only `realpathSync.native` and `readdir`'s `Dirent.isSymbolicLink()` see it.
+read-only. A junction created *inside the DSH sandbox* with `fs.symlinkSync(target, path, 'junction')`
+is invisible to `lstat` and unresolved by `realpathSync` (only `realpathSync.native` and `readdir`'s
+`Dirent.isSymbolicLink()` see it); an ordinary Windows junction such as `C:\Documents and Settings` is
+reported as a symlink — so the guard cannot depend on either spelling. See
+[`docs/PITFALLS.md`](docs/PITFALLS.md) for both measurements.
 
 So the guard is the **transaction**, not a prompt. `workflow_review` now snapshots the project into an
 isolated temp root (a real copy, never a link; links are audited and escaping ones refused), points the
