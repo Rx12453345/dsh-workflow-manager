@@ -171,11 +171,14 @@ They need a real delegation depth, real reviewer behaviour, a real multi-call se
 end-to-end flow respectively. All fixed with regression tests and mutants. **VERIFIED on a real host.**
 `NEXT-STEPS.md:1421–1440`.
 
-### The bootstrap checklist message is inverted — still open
-`buildBootstrap()` prints "Every feature is already complete; move to HANDOFF." while features remain,
-because it branches on `counts.total > 0` instead of `counts.open > 0`. Checkbox state is right, so no
-allow/deny decision is wrong — only the sentence misleads. **Still present at `lib/advance.js:551`** (read
-during this documentation pass); one-line fix. `NEXT-STEPS.md:1558–1568`.
+### The bootstrap checklist message was inverted — **FIXED**
+`buildBootstrap()` printed "Every feature is already complete; move to HANDOFF." while features remained,
+because the `open_feature` item's `todo` branched on `counts.total > 0` instead of `counts.open > 0`.
+Checkbox state was right, so no allow/deny decision was wrong — only the sentence misled. Fix: the same
+`counts.open > 0` drives `done` and the choice of `todo` text; the two closed cases keep their own
+`counts.total` conditions. **VERIFIED** by `test/governance.test.mjs` — `the bootstrap open_feature item
+never says "every feature is complete" while one is open`, plus `the bootstrap still names the genuinely
+closed cases`. `NEXT-STEPS.md:1558–1568`.
 
 ---
 
@@ -316,6 +319,19 @@ read-only**, so the stub was never used and Node's own runner ran everything. Fi
 the files) and that piped stdio is refused in this sandbox (EPERM), hence `stdio: 'inherit'`. **VERIFIED.**
 `NEXT-STEPS.md:760–766`.
 
+### A captured child cannot be a pipe inside the DSH sandbox — **FIXED**
+Every mutation harness spawned its child with piped stdio so it could parse TAP and read the exit status.
+The sandbox denies a named pipe, so in the installed environment the harnesses could not start their
+captured child at all (`spawnSync` failed with `EPERM`) — and a harness that cannot run is an evidence gap,
+not a pass. Fix: `tooling/child-output.mjs` redirects the child's stdout/stderr to temp-file **file
+descriptors** and returns `{ status, signal, error, stdout, stderr }`; TAP parsing, exit codes, lock
+handling, printed wording and byte-for-byte restoration are unchanged — only the transport moved.
+**VERIFIED** by running `mutation-check-approval.mjs`, `mutation-check-verification.mjs` and
+`mutation-check-work-unit.mjs` inside the sandbox: all three reached their mutants and printed the restore
+line, where before they could not start the child. `test/child-output.test.mjs` covers split streams, exit
+status, spawn failure and large output. The UI harnesses still cannot run there — they launch Chromium for
+the layout test — so `mutation-check-client/-panel/-project-tab` need a normal terminal.
+
 ### Restoration verification is weaker than it looks
 `mutation-check-approval.mjs` judged restoration **indirectly** (unit + smoke go green after rollback) and
 never compared bytes; it also exited 0 when an anchor failed or a mutant survived. Fixed: every restore is
@@ -368,6 +384,34 @@ change and a rewording cannot dodge the check. Instructive failure: `class: docs
 initially refused because `ui` was depth 1 and `logic` depth 2, and the fix was **not** to allow the
 downgrade but to raise `ui` to `logic`'s depth and add a human check, because a renderer is executable code
 *and* unmeasurable here. **VERIFIED** — V01–V27 all KILLED. `NEXT-STEPS.md:33–50, 128–168`.
+
+### A `git status` cross-check is not a security boundary — the framework does not reconcile the file list
+A framework-side cross-check of the author's `changed_files` against `git status --porcelain` was built on
+a WIP branch and then **dropped before landing** (P2.B1+). Three measured reasons. **(1)** `git status`
+reports only **uncommitted** changes, so a committed path is invisible; it is a convenience check, not a
+security boundary. **(2)** Its default runner captured git through piped stdio, which the DSH sandbox
+denies (`spawnSync git EPERM`), so in the installed environment the check could not run: it fell back to
+the declared list and reported `NOT CHECKED`, and the review still proceeded. **(3)** Its marginal
+completeness value over an independent reviewer instructed to run `git status` did not justify 649
+implementation lines plus roughly 1,240 lines / 24 tests in the WIP branch's governance test file, and four
+failed reviews. The landed design is **reviewer-side**: the author is told to run
+`git status --porcelain` before review, and the independent reviewer is told to run it and report any
+omitted path as an issue. **VERIFIED** that the reviewer prompt contains that instruction
+(`test/governance.test.mjs`); the framework-side cross-check is not present. An honest model can still
+miss generated or renamed files — the reviewer-side check reduces that far more cheaply, but it is an
+instruction, not an enforced boundary. See [DESIGN.md §11.3](DESIGN.md#113-why-the-framework-does-not-reconcile-the-declared-file-list).
+
+### Editing a reviewed file in a later feature stales an earlier PASS
+A docs feature that edits `README.md`, `CONTRIBUTING.md` or `docs/TESTING.md` — files an earlier feature
+covered — invalidates that earlier feature's PASS, because the fingerprint hashes the reviewed bytes.
+`workflow_status` then reports `stale`, and `COMMIT`/`HANDOFF` refuse it. This is not a routing bug to
+work around: it is what makes a PASS mean *these bytes*, and a PASS that survives arbitrary later edits is
+exactly the claim-not-evidence failure the fingerprint exists to prevent. Fix at the planning level: scope
+an edit to the feature that owns the file, or budget a **re-review** of the earlier feature. **Observed on
+this repository** — the P2.B1+ `docs-truth` pass stales the `harness-sandbox` PASS on `README.md`,
+`CONTRIBUTING.md` and `docs/TESTING.md`, and `harness-sandbox` must be re-reviewed after this pass rather
+than having its evidence edited. The staleness mechanism itself is **VERIFIED** by the fingerprint tests;
+never edit the evidence, and never ask `record-review` to accept a verdict the bytes no longer match.
 
 ### A `human_check` attestation is not proof, and a typed answer is not consent
 The framework cannot prove a human looked at a screen, so it is recorded as `caller-attestation`, never
@@ -528,6 +572,18 @@ never merged. The comparator self-tests each run, and an injected wrong expectat
 `RESULT: FAIL — the comparator itself is broken`. It still cannot prove that wrongly marking an in-package
 call as self-deployment is wrong, and reads only the **first** destination argument, with `unknown` counting
 as not earned. **VERIFIED.** `NEXT-STEPS.md:2690–2758`.
+
+### `sync --check` can report a CRLF/LF difference that is not a change — KNOWN, UNFIXED
+`tooling/sync-to-profile.mjs --check` decides identity by byte-exact comparison
+(`readFile(source).equals(readFile(target))`, lines 59 and 73). A line-ending-only difference — workspace
+LF, installed copy CRLF, or the reverse — is therefore reported as `DIFFERS` / `n differ` even though the
+text is semantically identical, and running the sync then copies the workspace bytes over and makes the
+"difference" vanish without any behavioural change. The trap is concluding that a real change was pending,
+or that the sync repaired something. It is a false alarm in the safe direction (it never hides a real
+difference), but it erodes trust in `--check`, which is the one read-only step that must stay believable.
+**Known, unfixed.** The fix is a content comparison that normalises `\r\n`/`\n` for the *verdict* while
+still reporting the byte-level difference, so "same text, different endings" is distinct from "different
+text". Source: `tooling/sync-to-profile.mjs`.
 
 ### A subagent cannot open a human interaction
 Any mechanism requiring a human answer before writing fails inside a delegated child — this plugin's

@@ -43,6 +43,90 @@ reparse-point delete guard → 1 red.
 
 ---
 
+---
+
+## 2026-10-25 — P2 governance (not yet deployed)
+
+These are user-visible changes on top of 0.2.0; the version recorded in `package.json` is unchanged
+because nothing here has been deployed. **Not yet deployed** — the checkout is the only copy.
+
+### Added
+
+- **HANDOFF refuses while features are open, and can be waived explicitly.** `workflow_advance` to
+  HANDOFF returns `open-features` and names the unfinished features. The only way past it is
+  `waive_open_features: true` plus a non-empty `waiver_reason`; the waiver is recorded in
+  `.dsh/WORKFLOW.json` (`waivers`) and in the transition's history entry, and echoed in the reply.
+  A waiver waives the **feature count only** — a stale reviewed PASS, unreadable evidence or an
+  illegal transition still refuse — and a blank reason is refused. The reason is capped at 500
+  characters where it is stored and rendered. **Not yet deployed.**
+- **`workflow_status` reports feature counts and the open set:**
+  `features: 1/2 complete, 1 open` plus one `open:` line per unfinished feature, so "phase EVALUATE"
+  no longer hides remaining work. The block is additive: a project with no features renders exactly
+  as before. A corrupt `FEATURES.json` now prints its `feature file problem` even when the file
+  reads as zero features, which is precisely when the problem is the only useful fact. **Not yet
+  deployed.**
+- **`recipe: docs` has a fast lane.** The phase machine may go `BUILD → EVALUATE` directly, skipping
+  `VERIFY`, and the move names what it skipped. That is the only edge the recipe adds; no recipe
+  adds `BUILD → COMMIT`, and `COMMIT` itself is not review-gated (`VERIFY → COMMIT` exists). Other
+  recipes keep the plain graph. **Not yet deployed.**
+
+### Fixed
+
+- **The declared `changed_files` is cross-checked against git.** When the reviewed project is a git
+  checkout, `git status` is read through argv (never a shell) and a path the declaration omitted is
+  added to the classification evidence and to the reviewer's prompt; git's own bookkeeping files are
+  excluded. A capped scan (>400 sorted paths) is reported as `complete: false` and
+  `workflow_review` returns `changed-files-incomplete` **before starting a reviewer or resolving a
+  class**, because a security path sorted after the cap was never evidence.
+  The durable evidence row's `files` / `files_fingerprint` cover the declared reviewed set plus
+  **tracked** modified additions only; untracked (`??`) additions are still prompt/class evidence and
+  are recorded in the bounded `git_cross_check.untracked`, but deleting a scratch file after a
+  review no longer turns a fresh PASS into a false STALE. Git paths keep leading/trailing spaces, so
+  a filename with a leading space is not collapsed into its sibling. **Not yet deployed.**
+
+---
+
+## Unreleased — P2.B1+ (not yet deployed)
+
+This batch is committed on `fix/p2b1-plus`; it has **not** been synced to the installed copy and has not
+been exercised on a restarted real host. It must not be recorded as deployed.
+
+### Fixed
+- **Mutation harnesses now run inside the DSH Windows sandbox.** Each harness captured its child through a
+  pipe, which the sandbox denies (`EPERM`), so the harnesses could not start their child there. They now
+  capture stdout/stderr through temp-file descriptors (`tooling/child-output.mjs`); TAP parsing, exit
+  codes, the shared lock, restoration checks and printed wording are unchanged. Verified by
+  `mutation-check-approval.mjs`, `mutation-check-verification.mjs` and `mutation-check-work-unit.mjs` in
+  the sandbox. The settings-page, panel and project-tab harnesses still need a normal terminal because
+  they launch Chromium.
+- **The bootstrap `open_feature` message no longer contradicts the report.** A satisfied item used to say
+  "Every feature is already complete; move to HANDOFF." while features were still open, because its todo
+  branched on `counts.total > 0`. Both halves now read `counts.open > 0`; covered by
+  `test/governance.test.mjs`.
+
+### Added — governance and a docs fast lane
+- `workflow_status` reports feature counts and the open feature list.
+- `HANDOFF` is refused while features are open. The only way past is an explicit `waive_open_features`
+  with a non-empty `waiver_reason`, recorded in the state; a waiver never waives a review.
+- `recipe: docs` adds exactly one edge, `BUILD → EVALUATE`, skipping `VERIFY`; no recipe adds
+  `BUILD → COMMIT`, and review still gates completion.
+- The author guidance now tells the author to run `git status --porcelain` before review and declare
+  every changed path; the reviewer prompt tells the reviewer to run it and report omitted paths as issues.
+
+### Changed — the framework cross-check was dropped
+- A framework-side check of `changed_files` against `git status --porcelain` was prototyped and **not
+  landed**. `git status` sees only uncommitted changes (so it is not a security boundary), its default
+  piped runner is denied in the sandbox (`EPERM`) so the check fell back to the declared list and reported
+  `NOT CHECKED`, and its marginal value did not justify 649 implementation lines plus roughly 1,240 lines
+  of tests and four failed reviews. The reviewer-side instruction above replaces it; `docs/DESIGN.md`
+  §11.3 records why a real design would need a base-commit diff.
+
+### Testing
+- Unit suite: **576 tests / 569 pass / 0 fail / 7 skipped** in the DSH sandbox; a normal terminal runs the
+  six environment tests and reports **576 / 575 pass / 0 fail / 1 skipped**.
+
+---
+
 ## [0.2.0] — 2026-10-24
 
 The A1–A5 batch, plus the follow-up hardening found by independent review. The final release candidate
@@ -89,8 +173,8 @@ was corrected by a docs-only follow-up after deployment; no code changed.
 - **A3 — the test runner was blocked by the DSH sandbox.** `npm test` now runs `run-unit-tests.mjs`,
     which detects the sandbox's piped-child `EPERM` and sets `DSH_WORKFLOW_SANDBOX=1`; the six
     environment-dependent tests (five mutation-lock races and the Chromium layout measurement) skip with
-    a visible reason, so the suite is 525 tests / 518 pass / 7 skip / 0 fail in the sandbox. A normal
-    terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
+    a visible reason, so the suite was 525 tests / 518 pass / 7 skip / 0 fail in the sandbox at the time. A
+    normal terminal does not set the flag and runs them. `npm run test:sandbox` forces the mode.
     `tooling/mutation-check.mjs` also normalises CRLF for anchor matching, restores the original
     Buffer, refreshes its M15 anchor, and exits 3/2/1 on restore/apply/survivor failures. The
     standalone M6 mutant is removed because the validator masks it (M6b remains the meaningful

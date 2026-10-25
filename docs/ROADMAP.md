@@ -18,11 +18,13 @@ Each line names the evidence, not an assurance.
 | Item | Evidence |
 |---|---|
 | Six tools register, and the shipped registry validator accepts all six definitions | `DSH_TOOLS_BUNDLE=<extracted>/dsh-tools/lib/index.js node tooling/validate-tool-definition.mjs` → `all 6 tool definitions are acceptable to the shipped registry`, exit 0 (NEXT-STEPS.md:1972, 2440) |
-| The offline unit suite | `node run-unit-tests.mjs` → **525 tests / 524 pass / 0 fail / 1 skip**; the skip is a Windows-only limitation (no catchable `SIGTERM`), not a failing case. In the DSH sandbox the same suite is 525 / 518 pass / 7 skip (six environment-gated cases). |
+| The offline unit suite | `node run-unit-tests.mjs` → **576 tests / 575 pass / 0 fail / 1 skip** in a normal terminal; the skip is a Windows-only limitation (no catchable `SIGTERM`), not a failing case. In the DSH sandbox the same suite is **576 / 569 pass / 0 fail / 7 skip** (six environment-gated cases). |
 | The full apply/execute/render chain on a fake ctx | `node run-smoke-test.mjs` → `smoke test passed` (NEXT-STEPS.md:1970) |
 | Patch values match code defaults | `node run-config-check.mjs` → `OK: every patch value matches its code default`; `resolved maxDepth is 2` (NEXT-STEPS.md:3155) |
 | The browser half is discoverable | `DSH_CLIENT_MODULES_BUNDLE=<extracted>/dsh-client-modules/lib/index.js node tooling/simulate-client-scan.mjs` STEP 1–5 OK (NEXT-STEPS.md:3154) |
 | Phase-machine refusals | Real host: an illegal transition lists the legal ones; `BUILD` is refused without the boot checklist; `pick` **moves** `PLAN → PICK` (TESTING.md:330) |
+| Bootstrap `open_feature` message | Fixed: `lib/advance.js` branches on `counts.open > 0`; `test/governance.test.mjs` asserts the item never says "every feature is complete" while one is open, and still names the genuinely closed cases |
+| Governance: `HANDOFF` refuses open features, the audited waiver, and the `docs` fast lane | **Offline only:** `test/governance.test.mjs` covers the refusal, the waiver-with-reason path and its audit record, and the single `BUILD → EVALUATE` edge. Not yet exercised on a real host. |
 | Reverse self-certification | Real host: with no review this session, `record-review` is refused with **"a claim that one passed is not evidence"** (TESTING.md:331) |
 | Review fingerprinting | Unit tests; mutation turns 2 tests red; real `FEATURES.json` carries `evidence[].fingerprint` (NEXT-STEPS.md:1392, 1409–1415) |
 | Independent review round-trip, delegation depth, and main-context isolation | Real host: a depth-1 child created a depth-2 reviewer with no `SubagentDepthError`, and the full round-trip returned to the main conversation as a summary only (NEXT-STEPS.md:1403–1407) |
@@ -37,7 +39,10 @@ Each line names the evidence, not an assurance.
 **Deployment state is not uniform.** Items are separately deployed; see CHANGELOG.md, which marks each
 one. At the end of the journal, `verification.policy`, the conversation tab, the sidebar panel and its
 layout fix, work-unit isolation, the self-deployment exemption and the project tab's effective-config
-view were all recorded as **not yet in the installed copy**.
+view were all recorded as **not yet in the installed copy**. The P2.B1+ batch on `fix/p2b1-plus` — the
+harness sandbox fix, governance + docs fast lane, reviewer-side working-tree check and bootstrap fix — is
+**committed but not deployed and not exercised on a real host**. The framework-side cross-check from that
+batch was dropped (see "Deliberately not implemented").
 
 ---
 
@@ -134,7 +139,8 @@ asking reviewers nicely for JSON.
 
 ## Deliberately not implemented
 
-These refuse rather than pretend. A refusal here is the designed behaviour, not a gap to close.
+These are deliberately not built, or built only far enough to refuse rather than pretend. A refusal here
+is the designed behaviour, not a gap to close.
 
 ### `workflow_gc scope=code` and `scope=docs`
 Both refuse as **not implemented**, by name, rather than returning an empty or optimistic report.
@@ -150,6 +156,28 @@ scope would read as "nothing drifted".
 net as a real one.
 **What it would take.** A scheduler in the host half, plus the decision of who triggers it (the plugin
 has no background loop).
+
+### A framework-side cross-check of `changed_files` against `git status`
+**Not implemented, and the prototype was dropped rather than shipped.** The idea was to have the framework
+reconcile the author's declared file list with `git status --porcelain`. It was built on a WIP branch,
+failed four independent reviews, and was removed. Three measured reasons:
+
+- **It is not a security boundary.** `git status` reports only **uncommitted** changes; a committed path
+  is invisible, so the check can miss exactly the files that matter most.
+- **It could not run where it was needed.** Its default runner captured git through piped stdio, which
+  the DSH sandbox denies (`spawnSync git EPERM`), so in the installed environment the check could not
+  run: it fell back to the declared list and reported `NOT CHECKED`. The review still proceeded, so the
+  installed environment gained no completeness check.
+- **The cost was not earned.** 649 implementation lines plus roughly 1,240 lines / 24 tests in the WIP
+  branch's governance test file (part of a 1,908-line file), and four failed reviews, bought marginal
+  completeness over an independent reviewer instructed to run `git status`.
+
+**What landed instead.** The author is told to run `git status --porcelain` before review, and the
+reviewer's prompt tells it to run the same command and report omitted paths as issues. That is an
+instruction, not an enforced boundary — an honest model can still miss generated or renamed files.
+**What a real design would need.** A **base-commit diff** (`git diff <base>...HEAD` plus untracked
+files) parsed and bound into the review fingerprint, with deleted and renamed paths handled explicitly;
+`git status` alone is the wrong primitive.
 
 ### `showInPluginPage` has no reader
 Declared on the panel row's schema and annotated as such in `cordis.patch.yml`, but **nothing reads it**.
@@ -194,18 +222,6 @@ loop closes and later deployments are authorised by the gate itself, with an aud
 partially** — `lib/tools.js` depends on `lib/work-unit.js`, and omitting the latter makes `tools.js` fail
 at import, removing the plugin's entire tool surface.
 
-### `tooling/` is not in `package.json`'s `files` list
-**What it is.** `files` is `["lib", "cordis.patch.yml", "README.md"]`, so a packed or installed copy has
-no `tooling/`. The verification scripts therefore cannot be run from the installed copy, and the copies
-that do exist there go stale — the profile directory was found to hold an older
-`tooling/check-config-schema.mjs` **and** `tooling/validate-tool-definition.mjs`. `test/` is excluded for
-the same reason, along with `docs/` (a packed tarball would not carry this file).
-**Why it is unfinished.** `tooling/` was never intended to ship ("tooling does not distribute"), which is
-a defensible decision — but it was never reconciled with the profile having a copy of it at all.
-**What it would take.** Either add `tooling` to `files` and accept shipping the harnesses, or make
-`sync-to-profile.mjs` not copy `tooling/` so the stale copies stop existing. Plus the same decision for
-`docs/`.
-
 ### A whole-file `write` of `lib/approval.js` passes by coincidence
 **What it is.** The file's own text contains both sample literal classes (`SECRET_VALUE_PATTERNS`'s
 session-cookie name, and `EXTERNAL_DESTINATION`'s network-command word in a comment). When both fall
@@ -236,12 +252,39 @@ reviewed.
 **What it would take.** Raise `evaluator.maxRounds` and re-run `workflow_review`, or have a human review
 the diffs.
 
-### The inverted bootstrap checklist message
-`lib/advance.js` renders `todo: counts.total > 0 ? 'Every feature is already complete; move to HANDOFF.'
-: 'No features yet.'` — but `counts.total > 0` is exactly the case where features remain open.
-Checkbox state is correct, so no allow/deny decision is wrong; only the sentence misleads.
-**Checked during this documentation pass:** still present at `lib/advance.js:551`.
-**What it would take.** One line: branch on `counts.open > 0`.
+### No mutation harness covers the governance / fast-lane logic
+`test/governance.test.mjs` covers the `HANDOFF` open-feature refusal, the waiver path and its audit
+record, the `docs` fast lane and the reviewer-prompt instruction, but **no mutation harness injects
+defects into that logic**. The seven official harnesses target the constraint ledger, approval,
+verification depth, work-unit state and the three UI surfaces. A regression in `lib/advance.js`'s
+governance branches or `lib/tools.js`'s fast-lane rendering could therefore survive with the suite green.
+**What it would take.** A `mutation-check-governance.mjs` with anchors for the waiver branch, the
+`open → done` mapping and the `BUILD → EVALUATE` edge table, wired into `tooling/.mutation-lock` like the
+others.
+
+### The UI mutation harnesses still need a normal terminal
+The three harnesses that exercise a rendered surface — `mutation-check-client.mjs`,
+`mutation-check-panel.mjs`, `mutation-check-project-tab.mjs` — launch Chromium for the layout test. The DSH
+sandbox cannot launch it, so they cannot produce a harness result there; the other four now run in-sandbox
+through the file-backed child capture.
+**Why it is unfixed.** It is the browser launch, not the capture.
+**What it would take.** Run them in a normal terminal (the documented path), or find a headless engine the
+sandbox permits.
+
+### `sync --check` can report a CRLF/LF difference that is not a change
+`tooling/sync-to-profile.mjs --check` compares bytes with `Buffer.equals` (lines 59 and 73), so a
+line-ending-only difference is reported as `DIFFERS` even when the text is identical; running the sync
+then copies the workspace bytes over and the difference disappears with no behavioural change. **Known,
+unfixed.** It is the safe direction — it cannot hide a real difference — but it erodes trust in the one
+read-only check that must stay believable. **What it would take.** A comparison that normalises `\r\n`/`\n`
+for the verdict while still reporting the byte-level difference.
+
+### Reviewer step 4 says to compare with a list that may be absent
+When `workflow_review` is called with no `changed_files`, `buildReviewPrompt` omits the "Files the author
+says changed" section, but step 4 still reads "compare it with the files the author listed above" — there
+is no list above. Minor: the reviewer can still run `git status`, which is the point of the step.
+**What it would take.** Branch step 4 on whether the list was rendered: state that the author declared no
+files and use `git status --porcelain` as the only source.
 
 ### `approvalMirrorable`'s conservative choice (runtime-unreachable)
 The project tab requires the defaults layer to *carry* an `approval` section, so a malformed
@@ -260,12 +303,6 @@ The panel row's three patch values were not checked by the existing tool. A `tes
 comparison against `DEFAULT_CONFIG` substitutes as a guard.
 **What it would take.** Teaching `run-config-check.mjs` about all three rows; the tool was out of scope
 in the round that added the panel.
-
-### Documentation conflict: `TESTING.md` §6 is stale on one row
-The workspace `TESTING.md` §6 table still reads **"❌ 未修的真实设计缺陷"** for the gate blocking its own
-deployment. The newer position is the journal: the exemption is implemented (and cannot authorise its own
-first deployment). The journal says explicitly to treat itself as the newer wording (NEXT-STEPS.md:2663–2664).
-`docs/TESTING.md` is maintained by a different author; this note is the hand-off.
 
 ### `test/review.test.mjs` mid-round flakiness
 Mid-round, 8 failures appeared there (`493 / 484 / 8 / 1`) while another agent was editing `lib/review.js`
@@ -288,23 +325,7 @@ this exact string, so renaming it is a coordinated change, not a find-and-replac
 Also decide on `"private": true`, which is present now.
 
 ### `package.json` `files` is incomplete for a documentation-bearing repo
-`["lib", "cordis.patch.yml", "README.md"]`. `docs/`, `CHANGELOG.md`, `LICENSE`, `test/` and `tooling/` are
-absent. `LICENSE` is included automatically by npm; the rest are not.
+`["lib", "tooling", "cordis.patch.yml", "README.md"]`. `tooling/` is now shipped deliberately — the
+installed reviewer reads the mutation-harness table from it, and `sync-to-profile.mjs` copies it — but
+`docs/`, `CHANGELOG.md` and `test/` are absent. `LICENSE` is included automatically by npm.
 **What it would take.** Add `docs` and `CHANGELOG.md` at minimum, if the docs are meant to reach users.
-
-### `scripts.status` references a file that does not exist
-`"status": "node bin/dsh-workflow.mjs status"`. **There is no `bin/` directory anywhere in the tree.**
-**Why it matters.** Any consumer running `pnpm status` gets a module-not-found error, and the entry reads
-as a working convenience.
-**What it would take.** Either write the script, or remove the entry and let `workflow_status` be the
-status surface.
-
-### `scripts.test` uses a different runner from every recorded number
-`"test": "node --test test/"` is the default isolated-mode runner. Every number in this repository's
-records comes from `run-unit-tests.mjs`, which uses `node --test --test-isolation=none` with the test
-files listed individually — single-process mode does not accept a directory, and piped stdio is refused
-in this sandbox (EPERM), hence `stdio: 'inherit'`.
-**Why it matters.** Two runners, one of them never exercised for this suite, means `pnpm test` and
-"the suite is green" can mean different things.
-**What it would take.** Point `scripts.test` at `run-unit-tests.mjs`, or verify that both runners produce
-the same result and say so.

@@ -43,7 +43,7 @@ Layer 4 does not substitute for layer 1, and layer 1 cannot substitute for layer
 ### 1. The offline suite
 
 ```powershell
-npm test                                     # expect: 0 fail; 7 skips in the DSH sandbox (6 environment + 1 platform)
+npm test                                     # expect: 0 fail (normal 576/575/0/1; sandbox 576/569/0/7)
 npm run test:sandbox                         # force the sandbox profile; the six environment tests skip with a reason
 node run-smoke-test.mjs                      # expect: "smoke test passed"
 node run-config-check.mjs                    # expect: two OK lines, and "resolved maxDepth is 2"
@@ -81,8 +81,11 @@ node tooling/mutation-check-verification.mjs  # the verification-depth policy
 Each one injects a defect, runs the suite, records whether it went red, then **restores the source byte
 for byte**.
 
-> **In the DSH Windows sandbox these harnesses cannot spawn their captured child (EPERM).** Run them in
-> a normal terminal, or use the harness's own sandbox mode where it has one. The unit suite is not a
+> **In the DSH Windows sandbox these harnesses capture their child's output through temp files,
+> not a pipe (`tooling/child-output.mjs`), because the sandbox denies a piped child (EPERM).** That
+> covers the constraints, approval, verification and work-unit harnesses. `mutation-check-client.mjs`,
+> `mutation-check-panel.mjs` and `mutation-check-project-tab.mjs` additionally run the Chromium layout
+> test, which the sandbox cannot launch, so run those three in a normal terminal. The unit suite is not a
 > substitute for a security-depth harness; a security change with no harness result is not finished.
 
 > **NEVER RUN TWO OF THESE CONCURRENTLY.**
@@ -165,8 +168,14 @@ this step. `tooling/simulate-client-scan.mjs` is a simulation, not the running U
 workflow_review feature="…" acceptance=[…] changed_files=[…] diff="…" sensors=[…] class=… round=1
 ```
 
-The only property that matters: **whoever did the work cannot declare it done.** Fix what the review
-locates, then review again with an incremented `round`. Read the verdict correctly:
+The only property that matters: **whoever did the work cannot declare it done.** Before calling it, run
+`git status --porcelain` and include every changed path in `changed_files`. The reviewer prompt tells the
+reviewer to run the same command and compare it with your list; a changed path that is missing is an
+issue, scored against `scope`, `tests` or `correctness`. That cross-check is **reviewer-side** — the
+framework does not reconcile the list itself, and `git status` sees only **uncommitted** changes, so a
+committed path is invisible and this is not a security boundary.
+
+Fix what the review locates, then review again with an incremented `round`. Read the verdict correctly:
 
 - `overall` is the mean of the **declared** dimensions — undeclared dimensions do not participate, so a
   reviewer cannot pad the mean with extra dimensions;
@@ -261,6 +270,16 @@ ask for a differently shaped action.
 it is exactly the problem this split fixes. A new trap belongs in `docs/PITFALLS.md` with a symptom, a
 root cause, a fix, and whether the fix was verified or only believed.
 
+### Editing a file that an earlier PASS covered stales that PASS
+
+The review fingerprint covers the files the PASS was granted on. A later change that edits one of them —
+including a documentation truth pass — makes that PASS `stale`: `workflow_status` says so, and
+`COMMIT`/`HANDOFF` refuse it until a fresh review runs. That is the mechanism working, not a routing bug.
+
+So either **scope each documentation edit to the feature that owns the file**, or **budget a re-review of
+the earlier feature** and expect its PASS to go stale. Do not edit the evidence, and do not try to make
+`record-review` accept a verdict the bytes no longer match.
+
 ### Found a code defect while documenting? Report it, don't fix it
 
 A documentation change that also edits code is an unreviewed code change wearing a docs badge. Report the
@@ -296,6 +315,8 @@ history the offline suite was fully green while the real host broke on the first
 - [ ] Synced (all files, never part), restarted, hard-reloaded, and the affected surface observed on a real host
 - [ ] Any refusal followed rather than worked around; anything blocked reported honestly
 - [ ] `workflow_review` run when the change is not obviously correct; findings fixed and re-reviewed with a new round
+- [ ] `git status --porcelain` run before review; every changed path declared in `changed_files`
+- [ ] If I edited a file covered by an earlier PASS, that PASS is knowingly staled and a re-review is budgeted (or the edit was scoped to its owning feature)
 - [ ] No literal obfuscated, split or encoded to pass the argument scanner
 - [ ] New pitfalls written into `docs/PITFALLS.md`, not into the README
 - [ ] User-visible changes added to `CHANGELOG.md`, with "not yet deployed" where it is true

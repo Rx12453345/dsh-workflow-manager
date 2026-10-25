@@ -129,7 +129,7 @@ Runs in seconds. Run it after **every** change.
 
 ```powershell
 cd <plugin>
-node run-unit-tests.mjs                       # expect: 525 tests, 524 pass, 0 fail, 1 skipped
+node run-unit-tests.mjs                       # expect: 576 tests, 575 pass, 0 fail, 1 skipped (normal terminal)
 node run-smoke-test.mjs                       # expect "smoke test passed"
 node run-config-check.mjs                     # expect 2 OK lines
 $env:DSH_TOOLS_BUNDLE = '<extracted>/dsh-tools/lib/index.js'; node tooling/validate-tool-definition.mjs
@@ -142,11 +142,11 @@ node tooling/sync-to-profile.mjs --check      # expect 0 differ
 `DSH_PROFILE_DIR` overrides the profile (default `~/.dsh/profiles/desktop`). The two shipped-bundle
 tools require the extracted host packages, because those bundles are not vendored here.
 
-The current **525 / 524 pass / 0 fail / 1 skipped** is the real figure measured from this repository in a
+The current **576 tests / 575 pass / 0 fail / 1 skipped** is the figure measured from this repository in a
 normal terminal. In the DSH sandbox the runner sets `DSH_WORKFLOW_SANDBOX=1`, so six environment-dependent
-tests skip as well: **525 tests / 518 pass / 0 fail / 7 skipped**. The single non-sandbox skip is a Windows
-limitation (the platform has no catchable `SIGTERM`), not a failing case. Test counts drift as work lands;
-**the failure count is the number that must be zero.**
+tests skip as well: **576 tests / 569 pass / 0 fail / 7 skipped** (measured in the sandbox). The single
+non-sandbox skip is a Windows limitation (the platform has no catchable `SIGTERM`), not a failing case. Test
+counts drift as work lands; **the failure count is the number that must be zero.**
 
 `tooling/check-config-schema.mjs` needs schemastery, so run it from the profile directory.
 
@@ -186,6 +186,16 @@ node tooling/mutation-check-verification.mjs  # the verification-depth policy
 
 Each mutant: inject a defect → run the suite → record whether it went red → **restore the source
 byte-for-byte**.
+
+**The captured child now runs inside the DSH Windows sandbox.** Each harness captures its child's
+output through temp files (`tooling/child-output.mjs`) instead of a pipe, because the sandbox denies a
+piped child (`EPERM`). The capture is still a real child process with a real exit status; only the
+transport of its stdout/stderr changed. **Verified by the three sandbox runs that previously could not
+start a captured child — `mutation-check-approval.mjs`, `mutation-check-verification.mjs` and
+`mutation-check-work-unit.mjs`** — each reached its mutants and printed its restore line. One environment
+limit remains separate from this: the settings-page, panel and tab harnesses (`mutation-check-client.mjs`,
+`mutation-check-panel.mjs`, `mutation-check-project-tab.mjs`) also run the Chromium layout test, which the
+sandbox cannot launch, so run those three in a normal terminal.
 
 > ⚠️ **Never run two of these concurrently.** They rewrite files under `lib/`. Two at once on
 > `lib/client.js` once left **two mutants permanently in the source tree while both processes printed
@@ -239,6 +249,24 @@ round:           1 (increment after a fix)
 - Every issue carries `reachable` and `reach`; **only reachable defects block**.
 - `observations` are records that do not affect the verdict.
 
+**The reviewer checks the working tree itself.** The prompt's step 4 tells the reviewer to run
+`git status --porcelain` in the project and compare it with the author's `changed_files`; any changed
+path missing from that list is an issue, scored against `scope`, `tests` or `correctness`. This is
+**reviewer-side**: the framework does not reconcile the list itself, and `git status` only sees
+**uncommitted** changes, so a committed path is invisible and this is not a security boundary. A real
+framework-side design would need a base-commit diff, not `git status` (see
+[DESIGN.md §11.3](DESIGN.md#113-why-the-framework-does-not-reconcile-the-declared-file-list)).
+
+**The PASS is bound to a fingerprint, so a later edit stales it.** `workflow_status` reports
+`fresh` / `stale` / `unknown`, and `COMMIT`/`HANDOFF` refuse a stale PASS. The consequence that catches
+people: a docs pass in a *later* feature that edits a file an *earlier* PASS covered **stales that
+earlier PASS**. That is the framework working, not a routing bug. Either scope documentation edits to
+the feature that owns the file, or budget a re-review of the earlier feature and expect it.
+
+**Re-review after a stale PASS** means a fresh `workflow_review` with an incremented `round`, on the
+current bytes. Do not edit the evidence, and do not ask `record-review` to accept the old verdict — the
+fingerprint is exactly what makes the verdict mean something.
+
 **Catches:** my own blind spots; problems that are reachable but that offline tests do not cover.
 
 **Cannot catch:** rendering, real mounts, UI.
@@ -291,10 +319,19 @@ workflow_advance action=boot smoke_passed=true   # the bootstrap checklist
 workflow_advance action=pick                     # select a feature AND enter PICK
 workflow_advance action=advance to=BUILD         # must be refused while the checklist is unmet
 workflow_advance action=advance to=COMMIT        # from INIT: must be refused, listing the legal moves
+workflow_advance action=advance to=HANDOFF       # with an open feature: `open-features`, and it names them
+workflow_advance action=advance to=HANDOFF waive_open_features=true
+                                                 # refused: `waiver-reason-required`
+workflow_advance action=advance to=HANDOFF waive_open_features=true waiver_reason="why"
+                                                 # allowed; WORKFLOW.json `waivers` gains the record
 ```
 - [ ] an illegal transition is refused and the message lists the **legal** moves
 - [ ] after `action=pick`, `phase` becomes `PICK` (not just a selection)
 - [ ] **`BUILD` is refused while the bootstrap checklist is unmet** (no new features on a broken foundation)
+- [ ] **`HANDOFF` is refused while any feature is open**, and the refusal lists them
+- [ ] a waiver **without a reason** is refused, and a waiver with one is recorded in `WORKFLOW.json`
+- [ ] with `recipe: docs`, `BUILD → EVALUATE` is allowed and the reply names `VERIFY` as skipped; with
+      any other recipe it is an `illegal-transition`; **no recipe may go `BUILD → COMMIT`**
 
 ### 4.4 `workflow_review` — the reverse self-certification check (the most important one)
 
@@ -306,6 +343,9 @@ workflow_advance action=record-review feature_id=<some feature>
 - [ ] after a real `workflow_review`, `passes` becomes `true`
 - [ ] **if the reviewed files were edited after the review, `record-review` must refuse** (the
       fingerprint is invalidated)
+- [ ] in a **git** project, a review whose `changed_files` omits a file `git status` reports shows
+      `DECLARATION INCOMPLETE` with that path, and the resolved class is the stricter of the claim and
+      the union; a project with no git says `NOT CHECKED` instead of `no mismatch`
 - [ ] each issue in the review report shows `reachable`, or `UNREACHABLE — recorded, does not block`
 
 ### 4.5 `workflow_gc`

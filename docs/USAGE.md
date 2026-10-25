@@ -64,7 +64,7 @@ You do not need to memorise them. This table is so that you can tell what the mo
 
 | Tool | In one line | Who calls it |
 |---|---|---|
-| `workflow_status` | See the current state — phase, configuration, depth | read-only; call it freely |
+| `workflow_status` | See the current state — phase, pending features, configuration, depth | read-only; call it freely |
 | `workflow_init` | Opt this project in | once per project |
 | `workflow_set` | Change one parameter | when you want to tune something |
 | `workflow_review` | **Start a brand-new reviewer subagent to score the work** | after finishing something |
@@ -80,12 +80,36 @@ INIT → PLAN → PICK → NEGOTIATE → BUILD → VERIFY → EVALUATE → COMMI
 初始化  规划   选一个   谈清验收     写代码   跑传感器   独立评审    提交    交接
 ```
 
-**Two gates you should know about, because they refuse:**
+**Two rules you should know about, because they decide what is allowed:**
 
-- **`BUILD` requires the bootstrap checklist first** — this prevents starting new features on a broken
-  foundation.
-- **`EVALUATE` requires a review this session actually ran** — *the model saying "the review passed" is
-  not evidence*. The framework only trusts a review it witnessed itself.
+- **`BUILD` refuses until the bootstrap checklist has run** — this prevents starting new features on
+  a broken foundation.
+- **A feature is marked complete only from a review this session actually ran** — *the model saying
+  "the review passed" is not evidence*. The framework only trusts a review it witnessed itself.
+  `COMMIT` itself is not review-gated (`VERIFY → COMMIT` exists), and the `recipe: docs` fast lane
+  can skip `VERIFY`; what the review protects is the completion mark, not every phase move.
+
+**Two more rules, added for governance:**
+
+- **`HANDOFF` is refused while any feature is still open**, and the refusal lists them. Leaving work
+  unfinished is sometimes the right call, so it can be waived — but only explicitly, and only with a
+  reason:
+
+  ```
+  workflow_advance action=advance to=HANDOFF waive_open_features=true waiver_reason="F003 is blocked on the user"
+  ```
+
+  The waiver is written to `.dsh/WORKFLOW.json` (`waivers`, plus the transition's history entry) and
+  echoed in the result, so a later reader can see that the handoff was deliberate. **A waiver waives
+  the feature count, never the review**: a stale reviewed PASS, unreadable evidence or an illegal
+  transition still refuse, and a waiver without a reason is refused.
+
+- **`recipe: docs` has a fast lane.** For a documentation/chore project the phase machine may go
+  `BUILD → EVALUATE` directly, skipping `VERIFY`, and `PICK → BUILD` already skips `NEGOTIATE`. That is
+  the only edge the recipe adds; no recipe adds `BUILD → COMMIT`. A feature is still marked complete
+  only by a review this session ran, while `COMMIT` itself is not review-gated (`VERIFY → COMMIT`
+  exists). Every other recipe keeps the plain graph. `workflow_status` and the advance reply both
+  name the extra move rather than reporting a graph the project does not have.
 
 ---
 
@@ -97,7 +121,19 @@ A feature can be marked complete **only by the framework, written from a real re
 carries a fingerprint. **A claim by the model that it passed is void.**
 
 If the reviewed files are edited after the review, the fingerprint is invalidated and the review must be
-redone.
+redone. The evidence now stores a file-only fingerprint and a diff hash, so a later `workflow_status`
+reports `fresh` / `stale` / `unknown` without trusting the author’s file list at read time; `COMMIT`
+and `HANDOFF` recheck every reviewed feature, not just the selected one, and refuse a `stale` PASS.
+Legacy or diff-only evidence is `UNKNOWN`, never fresh.
+
+Before the review starts, the author is told to run `git status --porcelain` and declare every changed
+path. The reviewer is told to run the same command and report any path that is missing from the list. This
+is a **reviewer-side** check: `git status` sees only uncommitted changes, so it is a completeness aid, not
+a security boundary. If a later change edits a file an earlier PASS covered, that earlier PASS becomes
+`stale` and must be reviewed again.
+
+A reviewer child that stops with `error` or `aborted` is retried **at most once**; the result reports
+`attempts` and `stopReason`, and `workflow_review` prints the retry record after its PASS/FAIL line.
 
 ### ② Context isolation
 
@@ -165,6 +201,33 @@ Then four change classes map to four depths:
 
 - When calling `workflow_review`, declare `class=docs` — **but the framework checks it against the files
   you actually changed.**
+- **The declaration is cross-checked against git — for uncommitted working-tree changes.** When the
+  reviewed project is a git checkout, `changed_files` is compared with `git status` (through
+  `execFileSync` with argument arrays — never a shell). A path git reports and the list omits is
+  **added to the evidence**, so within that working tree a subset cannot buy a shallower class; a
+  committed part of the change is not visible to `git status`, so it must still be declared. The
+  omission is reported in the verdict, the reviewer's prompt and a bounded `git_cross_check` summary
+  in the `FEATURES.json` evidence row written by `workflow_advance action=record-review`. The whole
+  audit is not persisted: the durable row keeps only this bounded summary of the cross-check — whether
+  git was checked (and whether the comparison was complete), the capped omitted-path list, the total,
+  the capped untracked list and the reason. `git` being absent, or the
+  project not being a repository, is a
+  recorded note — never a crash, and never reported as agreement. The framework's own
+  `.dsh/workflow.yml`, `.dsh/WORKFLOW.json`, `.dsh/FEATURES.json`, `.dsh/CONSTRAINTS.json` and
+  `.dsh/work/**` are excluded: the workflow writes them itself, and grading its own bookkeeping as a
+  code change would make every review of an active project a security change.
+- **The durable fingerprint excludes untracked additions.** git-reported `??` paths are evidence: they
+  are classified, listed in the reviewer's prompt and reported in `git_cross_check.untracked`. They are
+  **not** written into the evidence row's `files` / `files_fingerprint`, which cover the **declared
+  reviewed set plus tracked modified additions only**. The difference is deliberate — a scratch
+  untracked file can be deleted after a review, and a fingerprint that included it would report a false
+  `STALE` for a deletion that changed nothing that was reviewed. If a file is part of the change, declare
+  it (or commit it); it then becomes durable.
+- **A capped git scan is refused, not reported as a pass.** `git status` is bounded (400 sorted paths);
+  when a working tree reports more, the comparison says `complete: false` and `workflow_review`
+  returns `changed-files-incomplete` **without starting a reviewer or resolving a class** from the
+  truncated subset. A security path sorted after the cap would otherwise never be evidence. Narrow the
+  working tree (commit/stash/clean unrelated changes) so the change fits, then call again.
 - **A declaration can only add cost, never remove it.** `class=docs` while touching `lib/approval.js` is
   **refused by name**, and the strictest depth is used instead.
 - **The security class is not degradable** at any setting.
@@ -185,9 +248,18 @@ verification:
     - lib/auth.js
   ui:               # explicit rendered surfaces
     - web
+  nonExecutable:    # explicit data/docs; '*' and '**' allowed, never relabels source code
+    - data
   allowUnknownSources: false   # explicit opt-in; default false keeps unknown sources security
   inferUiFromExtensions: true  # false stops `.html` etc. from counting as UI by extension
 ```
+
+`nonExecutable` is the narrow declaration for a project's data tree: a matching **non-code** file
+(`data/report.json`) is graded `docs` instead of failing closed as an unclassified source. It is
+never an inference — with no list, `.json` and `data/` keep exactly the grading they had — and it
+cannot override a `security`/`ui` surface, a declared `sources` entry, the gate file
+`.dsh/workflow.yml`, a CI workflow, or `package.json`; it also cannot turn a code file
+(`data/tool.js`) into data.
 
 Only the installed plugin's own package gets the built-in lists. A typo or an absolute/`..` path in
 the classification invalidates the WHOLE classification rather than dropping just the bad entry; the
@@ -279,6 +351,10 @@ than text patterns: text can only be dodged, structure can be checked. See
   not vendored here. Pass a different package directory if needed.
 - **The mutation harnesses must never run concurrently** — they rewrite source files, and a shared lock
   now makes the second one fail fast.
+- **The code harnesses run in-session; the UI ones do not.** Constraints, approval, verification and
+  work-unit capture their child's output through temp files, so they work in the DSH sandbox.
+  `mutation-check-client`, `-panel` and `-project-tab` also launch Chromium for the layout test and need a
+  normal terminal.
 - **`node --check` does not catch scope errors.** One round nearly broke because a module-level helper
   referenced a dictionary inside a factory: syntactically valid, but a runtime `ReferenceError` that took
   the whole configuration table down.

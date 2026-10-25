@@ -547,6 +547,23 @@ still refused. Every unreadable input fails closed.
 It also cannot authorise its own **first** deployment: the copy running the gate predates the exemption.
 That first copy must be performed out of band. See [ROADMAP.md](ROADMAP.md).
 
+### 11.3 Why the framework does not reconcile the declared file list
+
+An early P2.B1 design had the framework cross-check the author's `changed_files` against
+`git status --porcelain`; it was built, failed four independent reviews, and was dropped rather than
+shipped, for three reasons. `git status` reports only **uncommitted** changes, so a committed path is
+invisible and the check is not a security boundary. Its default runner captured git through piped stdio,
+which the DSH sandbox denies (`spawnSync git EPERM`), so in the installed environment the check could not
+run: it fell back to the declared list and reported `NOT CHECKED`. Its marginal completeness value over an
+independent reviewer instructed to run `git status` did not justify 649 implementation lines plus roughly
+1,240 lines / 24 tests in the WIP branch's governance test file, and four failed reviews. The landed design
+is a division of labour: the author is told to run `git status` before review, the independent reviewer is
+told to run it and report omitted paths as issues, and the reviewer — not a byte-level gate — is where the
+judgement lives. That replacement is an instruction, not an enforced boundary: an honest model can still
+miss generated or renamed files, but the reviewer-side check reduces that far more cheaply. A real
+framework-side design, if ever wanted, would need a base-commit diff (`git diff <base>...HEAD` plus
+untracked files) bound into the fingerprint, not `git status`.
+
 ---
 
 ## 12. The two hard constraints on the client half
