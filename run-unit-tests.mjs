@@ -21,6 +21,12 @@
  * tests still run and still fail on a real defect. `--sandbox` forces the mode for a manual
  * check.
  *
+ * THE ISOLATION FLAG IS PROBED, NOT ASSUMED. `--test-isolation=none` exists in Node 24 and
+ * is rejected outright by Node 22 (`node.exe: bad option: --test-isolation=none`), which is
+ * what made CI's Node 22 job fail before it ran a single test. On a Node that does not accept
+ * it, the runner omits the flag and lets the ordinary per-file child isolation happen; that
+ * works wherever child processes can be spawned, which is exactly where the older Node runs.
+ *
  * Usage: node run-unit-tests.mjs [--sandbox]
  */
 
@@ -43,6 +49,21 @@ function sandboxDeniesPipes() {
     encoding: 'utf8',
   })
   return probe.error?.code === 'EPERM'
+}
+
+/**
+ * Whether this Node accepts `--test-isolation=none`.
+ *
+ * Probed rather than keyed on a version number, because the flag is a runtime detail and the
+ * CI matrix spans two majors. `stdio: 'ignore'` keeps the probe off the pipe path, so it also
+ * works inside the DSH sandbox — where the flag is both supported and REQUIRED (a piped child
+ * cannot start).
+ */
+function supportsNoIsolation() {
+  const probe = spawnSync(process.execPath, ['--test-isolation=none', '-e', ''], {
+    stdio: 'ignore',
+  })
+  return probe.status === 0
 }
 
 const forced = process.argv.includes('--sandbox')
@@ -68,9 +89,17 @@ if (FILES.length === 0) {
   process.exit(1)
 }
 
+const noIsolation = supportsNoIsolation()
+if (!noIsolation) {
+  console.log(
+    'dsh-workflow tests: this Node does not accept --test-isolation=none (Node 22 does not); ' +
+      'running with the default per-file isolation. Fine in CI, not usable inside the DSH sandbox.',
+  )
+}
+
 const result = spawnSync(
   process.execPath,
-  ['--test', '--test-isolation=none', ...FILES],
+  ['--test', ...(noIsolation ? ['--test-isolation=none'] : []), ...FILES],
   // `stdio: 'inherit'` specifically: the sandboxed environment cannot open a named
   // pipe for a captured child, but an inherited terminal passes straight through.
   {

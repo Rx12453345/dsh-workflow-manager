@@ -856,6 +856,34 @@ test('collectGitChanges reads a real repository, and framework state is not code
   }
 })
 
+test('collectGitChanges accepts an 8.3/case-aliased spelling of the project', t => {
+  // GIT PRINTS CANONICAL PATHS; THE CALLER'S SPELLING IS NOT NECESSARILY THE SAME. GitHub's
+  // Windows runners hand out %TEMP% as `C:\Users\RUNNER~1\...`, and `resolve()` keeps that
+  // spelling while `git rev-parse --show-toplevel` returns `C:\Users\runneradmin\...`. Every
+  // changed path then computed to `..\..\...`, and the cross-check reported "git reports no
+  // changed paths" while claiming to be COMPLETE — an authoritative-looking empty answer that
+  // silently removed the evidence a declared subset is meant to be checked against.
+  // Measured on CI run 40172196645: 12 governance tests failing exactly this way.
+  if (process.platform !== 'win32') {
+    t.skip('path aliasing is a Windows property')
+    return
+  }
+  const repo = makeRepo(t)
+  if (repo === null) return
+  try {
+    const aliased = repo.dir.toUpperCase()
+    assert.notEqual(aliased, repo.dir, 'the test needs a genuinely different spelling')
+    const git = collectGitChanges(aliased, { run: repo.run })
+    assert.equal(git.checked, true, git.reason)
+    assert.equal(git.complete, true, git.reason)
+    assert.deepEqual(git.paths, ['README.md', 'lib/approval.js'])
+    assert.equal(git.outsideProject, 0, 'no path may look like it lives outside the project')
+  } finally {
+    rmSync(repo.dir, { recursive: true, force: true })
+    rmSync(repo.run.scratch, { recursive: true, force: true })
+  }
+})
+
 test('the constraints ledger is framework bookkeeping: excluded, never evidence, never a class', async t => {
   // `workflow_gc` writes `.dsh/CONSTRAINTS.json` during the session being reviewed. It must not
   // read as a changed source, push a review to the security class, or survive into `missing`.

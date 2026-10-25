@@ -617,6 +617,32 @@ test('a restore from a tampered snapshot copy is refused, not written back', t =
   assert.equal(existsSync(join(project, 'src', 'a.js')), false, 'the project is left as it was')
 })
 
+test('a snapshot on an ALIASED temp path still certifies its copy', t => {
+  // GitHub's Windows runners report %TEMP% as an 8.3 short path (C:\Users\RUNNER~1\...), and a
+  // path differing only in letter case has the same property. Comparing every child's resolved
+  // path with its OWN spelling made each directory look like a reparse point: 50 CI failures,
+  // every review refusing with "it is a reparse point the directory listing did not flag". The
+  // scan canonicalises the root once and judges containment, so an alias is not a link.
+  if (process.platform !== 'win32') {
+    t.skip('path aliasing is a Windows property')
+    return
+  }
+  const project = makeProject(t)
+  const snapshot = createReviewSnapshot(project, { tempRoot: tmpdir().toUpperCase() })
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch {
+      // best effort
+    }
+  })
+
+  assert.equal(existsSync(join(snapshot.workDir, 'src', 'a.js')), true, 'the copy was made')
+  assert.equal(verifyReviewSnapshot(snapshot).clean, true, 'the fence accepts an aliased tree')
+  assert.equal(removeReviewSnapshot(snapshot).ok, true, 'the guarded delete accepts it too')
+})
+
 test('verifyReviewSnapshot reports a missing project as deletions to restore', t => {
   const project = makeProject(t)
   const before = signature(project)
