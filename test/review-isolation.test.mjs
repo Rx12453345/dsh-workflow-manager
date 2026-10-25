@@ -463,6 +463,10 @@ test('the cleanup refuses root it cannot prove is its own snapshot', t => {
   const removed = removeReviewSnapshot(snapshot)
   assert.equal(removed.ok, false)
   assert.match(removed.reason, /marker|snapshot/i)
+  // A KEPT SNAPSHOT MUST BE FINDABLE. A cleanup refusal that does not name the path is a
+  // message nobody can act on.
+  assert.equal(removed.kept, true)
+  assert.equal(removed.path, snapshot.rootDir)
   assert.equal(existsSync(join(project, 'src', 'a.js')), true, 'the project is untouched')
 })
 
@@ -512,6 +516,10 @@ test('the canary must survive, or the delete is reported as unsafe', t => {
   const removed = removeReviewSnapshot(snapshot)
   assert.equal(removed.ok, false)
   assert.match(removed.reason, /canary/)
+  // A LIVE REVIEW SHOWED THIS GAP: the reviewer's own `npm test` children still held the copy,
+  // the delete failed, and the message said "kept at (unknown)". Naming the path is the minimum.
+  assert.equal(removed.kept, true)
+  assert.equal(removed.path, snapshot.rootDir)
   assert.equal(existsSync(join(project, 'src', 'a.js')), true, 'the project is untouched')
 })
 
