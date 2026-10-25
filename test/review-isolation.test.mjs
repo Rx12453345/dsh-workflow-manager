@@ -136,6 +136,34 @@ function reviewerThat(effect) {
   }
 }
 
+/**
+ * Run a review and register removal of whatever snapshot it keeps.
+ *
+ * THE TESTS THAT PROVE CONTAMINATION KEEP THEIR SNAPSHOT ON PURPOSE, which is correct: it is
+ * the only remaining copy. But a test suite that leaves one temp tree per contamination case
+ * is a suite that litters — measured: five roots left behind by one run of this file. The
+ * kept root is registered for removal here so the production behaviour stays untouched and
+ * the test process leaves nothing behind.
+ *
+ * @param t - the node:test context.
+ * @param options - the runReview options.
+ * @returns the outcome, unchanged.
+ */
+async function runReviewWithCleanup(t, options) {
+  const outcome = await runReview(options)
+  const work = outcome?.isolation?.reviewerWorkspace
+  if (typeof work === 'string') {
+    t?.after?.(() => {
+      try {
+        rmSync(dirname(work), { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+      } catch {
+        // Best effort: a leftover temp root must not fail a green test.
+      }
+    })
+  }
+  return outcome
+}
+
 /** Count reparse points below a directory, independently of the module under test. */
 function countLinks(dir) {
   let links = 0
@@ -210,7 +238,7 @@ test('a clean review leaves the project byte-identical and removes the copy', as
   const before = signature(project)
   const { calls, service } = reviewerThat()
 
-  const outcome = await runReview({
+  const outcome = await runReviewWithCleanup(t, {
     feature: 'a change',
     parent: { id: 'parent-1' },
     subagents: service,
@@ -248,7 +276,7 @@ test('a reviewer that deletes the project cannot pass, and the fence restores ev
     rmSync(project, { recursive: true, force: true })
   })
 
-  const outcome = await runReview({
+  const outcome = await runReviewWithCleanup(t, {
     feature: 'a change',
     parent: { id: 'parent-1' },
     subagents: service,
@@ -298,7 +326,7 @@ test('the incident shape: a delete THROUGH a junction to the project is restored
     }
   })
 
-  const outcome = await runReview({
+  const outcome = await runReviewWithCleanup(t, {
     feature: 'a change',
     parent: { id: 'parent-1' },
     subagents: service,
@@ -319,7 +347,7 @@ test('a modified file is reported, not silently reverted, and the review fails',
     writeFileSync(join(project, 'package.json'), '{"name":"TAMPERED"}\n')
   })
 
-  const outcome = await runReview({
+  const outcome = await runReviewWithCleanup(t, {
     feature: 'a change',
     parent: { id: 'parent-1' },
     subagents: service,
@@ -342,7 +370,7 @@ test('an added path is reported as contamination', async t => {
     writeFileSync(join(project, 'REVIEWER-NOTES.md'), 'scratch\n')
   })
 
-  const outcome = await runReview({
+  const outcome = await runReviewWithCleanup(t, {
     feature: 'a change',
     parent: { id: 'parent-1' },
     subagents: service,
@@ -366,7 +394,7 @@ test('a project containing a link that escapes it is refused, and no reviewer st
 
   const { calls, service } = reviewerThat()
 
-  const outcome = await runReview({
+  const outcome = await runReviewWithCleanup(t, {
     feature: 'a change',
     parent: { id: 'parent-1' },
     subagents: service,
@@ -382,7 +410,7 @@ test('a project containing a link that escapes it is refused, and no reviewer st
 
 test('without a workspaceDir the review keeps its old behaviour (no isolation)', async t => {
   const { service } = reviewerThat()
-  const outcome = await runReview({
+  const outcome = await runReviewWithCleanup(t, {
     feature: 'a change',
     parent: { id: 'parent-1' },
     subagents: service,
@@ -526,7 +554,7 @@ test('the canary must survive, or the delete is reported as unsafe', t => {
 test('the report says the project was verified, and says it the honest way', async t => {
   const project = makeProject(t)
   const { service } = reviewerThat()
-  const outcome = await runReview({
+  const outcome = await runReviewWithCleanup(t, {
     feature: 'a change',
     parent: { id: 'parent-1' },
     subagents: service,
@@ -544,7 +572,7 @@ test('the report shouts CONTAMINATED and names where the snapshot was kept', asy
   const { service } = reviewerThat(() => {
     writeFileSync(join(project, 'REVIEWER-NOTES.md'), 'scratch\n')
   })
-  const outcome = await runReview({
+  const outcome = await runReviewWithCleanup(t, {
     feature: 'a change',
     parent: { id: 'parent-1' },
     subagents: service,
