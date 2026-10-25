@@ -1,6 +1,6 @@
 {
   "name": "src-12453345_-dsh-workflow",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "DeepSeek Harness workflow plugin: tiered, fully switchable agent-workflow harness — context isolation, independent review, approval strength, constraint retirement.",
   "type": "module",
   "main": "lib/index.js",
