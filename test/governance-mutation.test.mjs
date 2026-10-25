@@ -161,6 +161,19 @@ test('runGovernanceProbe: a surviving mutant is a missing test (exit 1), not a p
   assert.equal(result.rows[0].verdict, 'SURVIVED')
 })
 
+test('runGovernanceProbe: a NOT RUN mutant after a GREEN baseline is NOT a catch (exit 2)', () => {
+  // The baseline is GREEN, so the mutant IS run; its own run then yields no evidence — a crash
+  // with a failure count but no passing test. That is NOT RUN, never SURVIVED and never CAUGHT,
+  // and the run exits 2. This is the branch a green baseline opens and a red one skips.
+  const crashed = run({ status: 1, body: '✖ the file could not be loaded (0ms)', pass: 0, fail: 1 })
+  const { runner, calls } = scripted(green(), crashed)
+  const result = runGovernanceProbe({ runTests: runner, mutants: [SYNTHETIC], log: quiet })
+  assert.equal(result.exitCode, EXIT_NOT_RUN)
+  assert.equal(result.rows[0].verdict, 'NOT RUN')
+  assert.match(result.rows[0].reason, /crash or load error is not a caught mutant/)
+  assert.equal(calls.length, 2, 'a green baseline means the mutant run IS attempted')
+})
+
 test('runGovernanceProbe: red for the WRONG test does not count as caught', () => {
   const { runner } = scripted(green(), red(['some other test entirely']))
   const result = runGovernanceProbe({ runTests: runner, mutants: [SYNTHETIC], log: quiet })
@@ -179,11 +192,21 @@ test('runGovernanceProbe: red for the NAMED test is CAUGHT (exit 0)', () => {
 test('runGovernanceProbe: an unusable anchor is NOT APPLIED, never a survivor or a pass', () => {
   const broken = { id: 'X1', what: 'a broken anchor', file: 'lib/tools.js', from: 'this literal is not in the source', to: 'x', must: ['x'] }
   const { runner, calls } = scripted(green())
-  const result = runGovernanceProbe({ runTests: runner, mutants: [broken], log: quiet })
+  const lines = []
+  const result = runGovernanceProbe({ runTests: runner, mutants: [broken], log: line => lines.push(String(line)) })
   assert.equal(result.exitCode, EXIT_UNEXPECTED)
   assert.equal(result.rows[0].verdict, 'NOT APPLIED')
   assert.match(result.rows[0].reason, /anchor occurs 0x/)
   assert.equal(calls.length, 1, 'an unapplied mutant must not run the suite')
+  // The headline must not claim the anchors were verified when one of them was NOT APPLIED.
+  assert.ok(
+    !lines.some(line => /anchors verified/.test(line)),
+    'an unusable anchor must not be reported as "anchors verified"',
+  )
+  assert.ok(
+    lines.some(line => /anchors NOT all applied: 1 of 1 mutant/.test(line)),
+    'the report must say the anchors were not all applied',
+  )
 })
 
 test('runGovernanceProbe: an unknown mutant id is a refusal, never a zero-mutant pass', () => {

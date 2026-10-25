@@ -115,11 +115,14 @@ export const MUTANTS = [
     id: 'G01',
     what: 'HANDOFF proceeds with open features and no waiver at all',
     file: 'lib/tools.js',
-    // THE DEFECT NEEDS BOTH GUARDS REMOVED. With only `if (!waiverRequested)` neutralised, the
-    // empty-reason check below it still refuses (waiverReason is always '' when no waiver was
-    // asked for), so the "silent handoff" defect would NOT be reachable through the public tool —
-    // the mutant would only relabel the refusal. Both edits make it reachable: either guard alone
-    // is therefore not an honest mutant of this rule.
+    // THE DEFECT NEEDS BOTH GUARDS REMOVED, AND NOT BECAUSE EITHER ALONE STILL REFUSES.
+    // Neutralising only `if (!waiverRequested)` leaves the empty-reason guard, which refuses a call
+    // that supplies no reason — but that guard reads the reason STRING, not the flag, so a caller
+    // that passes `waiver_reason` without `waive_open_features: true` slips past it. The
+    // single-guard mutant would then exercise that side channel rather than the rule this mutant is
+    // about ("no waiver at all"). Removing both makes the plain call — no flag, no reason — reach
+    // the transition. The product is safe because both guards are present AND `handoffWaived`
+    // (`:4041`) requires both arguments; the mutant removes both only to reach the defect.
     from: `        if (!waiverRequested) {`,
     to: `        if (false) {`,
     extra: {
@@ -483,8 +486,17 @@ export function runGovernanceProbe({
     })
   }
 
+  const unusableAnchors = rows.filter(row => row.verdict === 'NOT APPLIED').length
   log('mutation check: HANDOFF governance, the waiver and the docs fast lane')
-  log(`anchors verified against ${rows.length} mutant(s)\n`)
+  // "VERIFIED" IS A CLAIM ABOUT EVERY ANCHOR. An anchor that did not occur exactly once never ran
+  // its mutant, so printing "anchors verified" next to a NOT APPLIED row would be a false headline
+  // over a report whose exit code says the run failed.
+  log(
+    unusableAnchors === 0
+      ? `anchors verified against ${rows.length} mutant(s)\n`
+      : `anchors NOT all applied: ${unusableAnchors} of ${rows.length} mutant(s) had an unusable ` +
+          `anchor — see the NOT APPLIED row(s)\n`,
+  )
 
   for (const row of rows) {
     log(`${row.verdict.padEnd(12)} ${row.id}  ${row.file}`)
