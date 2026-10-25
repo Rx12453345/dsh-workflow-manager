@@ -1968,4 +1968,3 @@ test('a feature is OPEN unless passes is exactly true: absent and the STRING "fa
     rmSync(dir, { recursive: true, force: true })
   }
 })
-

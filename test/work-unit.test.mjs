@@ -963,6 +963,38 @@ test('buildBootstrap and the renderer survive a hand-edited state file inside a 
   }
 })
 
+test('the status tool refuses an unusable work_unit instead of blaming FEATURES.json', async () => {
+  // BEFORE THE FIX the raw label reached `readFeatures` AND `readState`, so the validator's
+  // sentence appeared TWICE under `feature file problem:` — a caller whose ARGUMENT was wrong was
+  // told its feature file was broken. The refusal now matches every other tool that takes a
+  // `work_unit`: one sentence, the accepted characters once, `status: bad-work-unit`, and no
+  // silent fallback to the project-level state.
+  const dir = makeProject()
+  try {
+    const statusDef = buildToolDefinition({ config: resolveConfig({}), ctx: null, services: null })
+    const result = await statusDef.execute({ work_unit: '../x' }, execFor(dir))
+    assert.equal(result.ok, false)
+    assert.equal(result.status, 'bad-work-unit')
+    assert.equal(result.workUnit, '../x')
+    assert.match(result.reason, /\[A-Za-z0-9\._-\]/, 'the refusal names the accepted characters')
+    assert.doesNotMatch(result.reason, /feature file/i)
+    assert.equal(
+      (result.reason.match(/may contain only letters/g) ?? []).length,
+      1,
+      'the validator must speak once, not once per reader',
+    )
+
+    // The renderer must print the refusal rather than throw on a payload that has no report
+    // sections (no plugin/hostServices/project) — the caller needs the sentence, not a crash.
+    const text = renderStatus(result)
+    assert.match(text, /^status: bad-work-unit/)
+    assert.match(text, /work unit id may contain only letters/)
+    assert.doesNotMatch(text, /feature file problem/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('the status tool and the gc tool honour work_unit', async () => {
   const dir = makeProject()
   try {
