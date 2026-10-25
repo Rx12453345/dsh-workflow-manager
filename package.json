@@ -36,6 +36,7 @@
   },
   "files": [
     "lib",
+    "tooling",
     "cordis.patch.yml",
     "README.md"
   ],

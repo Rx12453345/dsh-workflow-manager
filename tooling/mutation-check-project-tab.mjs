@@ -22,8 +22,8 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { runCaptured } from './child-output.mjs'
 
 // The lock is reached from the project's own tooling directory: `mutation-check-approval`
 // mutates lib/client.js too, and this harness rewrites the same file, so they must contend.
@@ -589,12 +589,12 @@ async function main() {
         let status = null
         try {
           writeFileSync(CLIENT, normalised.replace(mutant.find, mutant.replace), 'utf8')
-          const run = spawnSync(
+          const run = runCaptured(
             process.execPath,
             ['--test', '--test-isolation=none', 'test/status.test.mjs'],
-            { cwd: ROOT, encoding: 'utf8' },
+            { cwd: ROOT },
           )
-          output = `${run.stdout ?? ''}${run.stderr ?? ''}`
+          output = `${run.stdout}${run.stderr}`
           status = run.status
         } finally {
           restore()

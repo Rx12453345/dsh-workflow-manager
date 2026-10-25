@@ -9,8 +9,8 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { runCaptured } from './child-output.mjs'
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -354,12 +354,12 @@ async function main() {
         let status = null
         try {
           writeFileSync(mutant.file, normalised.replace(mutant.find, mutant.replace), 'utf8')
-          const run = spawnSync(
+          const run = runCaptured(
             process.execPath,
             ['--test', '--test-isolation=none', 'test/status.test.mjs'],
-            { cwd: ROOT, encoding: 'utf8' },
+            { cwd: ROOT },
           )
-          output = `${run.stdout ?? ''}${run.stderr ?? ''}`
+          output = `${run.stdout}${run.stderr}`
           status = run.status
         } finally {
           restore()

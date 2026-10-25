@@ -15,7 +15,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import { runCaptured } from './child-output.mjs'
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
 
 const TEST_FILE = 'test/work-unit.test.mjs'
@@ -204,17 +204,17 @@ const MUTANTS = [
 ]
 
 function runTests() {
-  const result = spawnSync(
+  // FILE-BACKED CAPTURE: the sandbox denies a piped child (EPERM); see tooling/child-output.mjs.
+  const result = runCaptured(
     process.execPath,
     // TAP so a failing run names the tests that caught the mutant; without it the default
     // reporter prints specs and the harness can only report "something failed".
     ['--test', '--test-reporter=tap', '--test-isolation=none', TEST_FILE],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
   )
   if (result.error) {
     return { ok: false, error: result.error, output: '' }
   }
-  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`
+  const output = `${result.stdout}\n${result.stderr}`
   const failing = output
     .split(/\r?\n/)
     .filter(line => /^\s*not ok /.test(line))

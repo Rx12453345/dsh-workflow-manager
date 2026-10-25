@@ -21,8 +21,12 @@ const SRC = process.env.DSH_WORKFLOW_SRC ?? resolve(dirname(fileURLToPath(import
 const PROFILE_DIR = process.env.DSH_PROFILE_DIR ?? join(homedir(), '.dsh', 'profiles', 'desktop')
 const DST = join(PROFILE_DIR, 'node_modules', 'src-12453345_-dsh-workflow')
 
-/** Everything the runtime needs; tooling/test files stay workspace-only. */
-const INCLUDE = ['lib', 'package.json', 'cordis.patch.yml', 'README.md']
+/**
+ * Everything the runtime needs. `tooling/` is shipped because `lib/review.js` reads the
+ * mutation-harness table from it; without this copy an installed review honestly reports
+ * the table as UNREADABLE. `test/` stays workspace-only.
+ */
+const INCLUDE = ['lib', 'tooling', 'package.json', 'cordis.patch.yml', 'README.md']
 
 const checkOnly = process.argv.includes('--check')
 

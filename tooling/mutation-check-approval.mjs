@@ -8,8 +8,8 @@
  */
 
 import { readFileSync, writeFileSync } from 'node:fs'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { runCaptured } from './child-output.mjs'
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
 
 // REPO-RELATIVE, NOT THE OLD P5 PATH. The harness was written in one development checkout and
@@ -767,8 +767,9 @@ function run(suite) {
     suite === 'smoke'
       ? ['run-smoke-test.mjs']
       : ['--test', '--test-isolation=none', 'test/approval.test.mjs']
-  const result = spawnSync(process.execPath, args, { cwd: ROOT, encoding: 'utf8' })
-  return { status: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}` }
+  // FILE-BACKED CAPTURE: the sandbox denies a piped child (EPERM); see tooling/child-output.mjs.
+  const result = runCaptured(process.execPath, args, { cwd: ROOT })
+  return { status: result.status, output: `${result.stdout}${result.stderr}` }
 }
 
 /**

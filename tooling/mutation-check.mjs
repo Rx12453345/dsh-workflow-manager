@@ -9,8 +9,8 @@
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { runCaptured } from './child-output.mjs'
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
 
 // Repo-relative; see the comment in mutation-check-approval.mjs. The old P5 path made the
@@ -301,9 +301,12 @@ function sha(text) {
 }
 
 function runSuite() {
-  const result = spawnSync(process.execPath, ['run-unit-tests.mjs'], { cwd: ROOT, encoding: 'utf8' })
+  // FILE-BACKED CAPTURE. A piped child is denied by the DSH Windows sandbox (EPERM), and this
+  // harness must be able to run there; tooling/child-output.mjs redirects the output to temp
+  // files instead of a pipe.
+  const result = runCaptured(process.execPath, ['run-unit-tests.mjs'], { cwd: ROOT })
   if (result.error) return { error: result.error.message, output: '' }
-  return { error: null, output: `${result.stdout ?? ''}${result.stderr ?? ''}`, status: result.status }
+  return { error: null, output: `${result.stdout}${result.stderr}`, status: result.status }
 }
 
 function failingTests(output) {
