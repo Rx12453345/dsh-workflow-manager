@@ -423,8 +423,10 @@ The reviewer-side instruction stands, and the framework now reconciles the decla
 array (never a shell), `lib/tools.js` folds a declared-omitted path into the evidence, `lib/review.js`
 renders a `## Git cross-check of the changed-file list` section for the reviewer, and a bounded
 `git_cross_check` row is persisted with the verdict. **VERIFIED** — the cross-check rows (the declared
-list, the git rows, the bounded-scan flag) are asserted in `test/governance.test.mjs`; the
-reviewer-side instruction is prose in `lib/review.js`, and no test asserts its wording.
+list, the git rows, the bounded-scan flag) are asserted in `test/governance.test.mjs`, and both branches
+of the reviewer instruction's wording are asserted in `test/review.test.mjs` (with a file list it says to
+compare against that list; with none it says git is the only scope evidence and does not emit "listed
+above").
 
 The cross-check was first built on a WIP branch and **dropped before landing** at that point (P2.B1+),
 then re-landed on 2026-10-25 with a fix beside each measured reason:

@@ -76,7 +76,10 @@ Unverified specifically:
 
 ### The sidebar layout fix (D) — 11-item manual checklist
 The two-column defect is fixed and its geometry is measured in a real engine (headless Chromium:
-`0px 244px` before, `264px` after). **The fix was never synced, so the interface has not been seen.**
+`0px 244px` before, `264px` after). At the time this was written the fix had not been synced, so the
+interface had not been seen; the installed copy has since carried it — `node tooling/sync-to-profile.mjs
+--check` shows `lib/client.js` identical to this tree, and that file contains the `gridTemplateColumns:
+'100%'` fix. What has no recorded result is the visual walk-through itself:
 The checklist is NEXT-STEPS.md:2808–2820: label no longer wraps per character; single column; full-width
 row dividers; left-aligned and ≤520 px; looser row gap; the settings page **still** two-column with a
 200 px label column (the control group); the `llm-only` warning banner full width; the tab shows the
@@ -102,7 +105,10 @@ other than "re-read".
 ### The `verification.policy` real-host path
 Implemented and self-tested (V01–V27), and **never exercised on a real host**: this project had not
 opted in at the time, and there was no GUI. Covered only by six cases in `test/review.test.mjs` that go
-through the **real `execute`** with fake `subagents` / fake `userQuestions`. Not deployed.
+through the **real `execute`** with fake `subagents` / fake `userQuestions`. It was **not deployed when
+this was written**; the later sync carried the code into the installed `lib/review.js` (check with
+`node tooling/sync-to-profile.mjs --check`), so what remains unproven is the run on a real host, not
+the presence of the code.
 **What it would take.** Deploy, then call `workflow_review` with a `class` and `changed_files` on a real
 host and read the report and the refusal text. Also unverified: the human-check attestation path
 (`caller-attestation`) can only ever be an attestation.
@@ -308,12 +314,13 @@ through the file-backed child capture.
 **What it would take.** Run them in a normal terminal (the documented path), or find a headless engine the
 sandbox permits.
 
-### Reviewer step 4 says to compare with a list that may be absent
-When `workflow_review` is called with no `changed_files`, `buildReviewPrompt` omits the "Files the author
-says changed" section, but step 4 still reads "compare it with the files the author listed above" — there
-is no list above. Minor: the reviewer can still run `git status`, which is the point of the step.
-**What it would take.** Branch step 4 on whether the list was rendered: state that the author declared no
-files and use `git status --porcelain` as the only source.
+### Reviewer step 4 used to compare with a list that could be absent — **FIXED**
+When `workflow_review` was called with no `changed_files`, `buildReviewPrompt` omitted the "Files the
+author says changed" section, but step 4 still read "compare it with the files the author listed above" —
+there was no list above. Step 4 now branches on whether the list was rendered: with a list it says to
+compare against it, and with none it says git is the only scope evidence and drops the "listed above"
+phrase. Both branches are asserted in `test/review.test.mjs`, so reverting the branch turns the suite red
+(a review proved the wording was unpinned before that test existed).
 
 ### `approvalMirrorable`'s conservative choice (runtime-unreachable)
 The project tab requires the defaults layer to *carry* an `approval` section, so a malformed
