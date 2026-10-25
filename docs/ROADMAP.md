@@ -76,10 +76,9 @@ Unverified specifically:
 
 ### The sidebar layout fix (D) — 11-item manual checklist
 The two-column defect is fixed and its geometry is measured in a real engine (headless Chromium:
-`0px 244px` before, `264px` after). At the time this was written the fix had not been synced, so the
-interface had not been seen; the installed copy has since carried it — `node tooling/sync-to-profile.mjs
---check` shows `lib/client.js` identical to this tree, and that file contains the `gridTemplateColumns:
-'100%'` fix. What has no recorded result is the visual walk-through itself:
+`0px 244px` before, `264px` after). The deployment history is in CHANGELOG.md, and what is installed
+right now is a `node tooling/sync-to-profile.mjs --check` question this page deliberately does not
+answer. What has no recorded result is the visual walk-through itself:
 The checklist is NEXT-STEPS.md:2808–2820: label no longer wraps per character; single column; full-width
 row dividers; left-aligned and ≤520 px; looser row gap; the settings page **still** two-column with a
 200 px label column (the control group); the `llm-only` warning banner full width; the tab shows the
@@ -105,10 +104,9 @@ other than "re-read".
 ### The `verification.policy` real-host path
 Implemented and self-tested (V01–V27), and **never exercised on a real host**: this project had not
 opted in at the time, and there was no GUI. Covered only by six cases in `test/review.test.mjs` that go
-through the **real `execute`** with fake `subagents` / fake `userQuestions`. It was **not deployed when
-this was written**; the later sync carried the code into the installed `lib/review.js` (check with
-`node tooling/sync-to-profile.mjs --check`), so what remains unproven is the run on a real host, not
-the presence of the code.
+through the **real `execute`** with fake `subagents` / fake `userQuestions`. What remains unproven is
+the run on a real host, not the presence of the code: which build carried this code, and when, is in
+CHANGELOG.md, and what is installed right now is again a `--check` question this page does not answer.
 **What it would take.** Deploy, then call `workflow_review` with a `class` and `changed_files` on a real
 host and read the report and the refusal text. Also unverified: the human-check attestation path
 (`caller-attestation`) can only ever be an attestation.

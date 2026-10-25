@@ -94,6 +94,18 @@ into `tooling/sync-plan.mjs`'s `planSync` so it can be tested without a deployme
   `..\..\` bug on any Windows machine rather than passing.
 - **Docs no longer restate drifting test totals.** The stale 576/569 figures in README, TESTING,
   CONTRIBUTING and ROADMAP say "0 fail" instead, which is the only number that must not drift.
+- **`workflow_status` refuses an unusable `work_unit`, like every other tool.** The label used to be
+  passed straight to `readFeatures` and `readState`, which printed the validator's sentence twice
+  under `feature file problem:` — a caller whose ARGUMENT was wrong was told its feature file was
+  broken — and a project that had not opted in swallowed the label entirely. It is now validated
+  before anything is read and refused with `bad-work-unit`, naming the accepted characters; the
+  renderer prints that refusal instead of throwing on a payload with no report sections.
+  `test/work-unit.test.mjs` pins the wording, the single sentence, and the non-opted case.
+- **Reviewer step 4 no longer points at a list that may be absent.** With a `changed_files` list the
+  step says to compare `git status` against it; with none it says git is the only scope evidence and
+  does not emit "listed above" (the file-list section is not rendered in that case either). Both
+  branches are asserted in `test/review.test.mjs`; before that test existed, reverting the branch
+  left the suite green.
 - **Housekeeping:** `collectGitChanges` owns its JSDoc again; `sync-plan.mjs` no longer exports its
   internal `walk`, reuses `sameTextContent`, and its `mkdir` comment states the measured truth
   (`fs.cp` creates missing destination parents); the governance harness's `PASSEED` typo is fixed,
