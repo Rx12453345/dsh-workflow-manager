@@ -174,8 +174,9 @@ transition other than `→ COMMIT`. **VERIFIED.** `NEXT-STEPS.md:1342–1353, 14
 
 ### A CRLF checkout staled a review of the same text — **FIXED**
 The fingerprint hashed the reviewed files' raw bytes, and this repository holds **both** styles: on
-2026-10-25 `git ls-files --eol` reported every tracked blob as `i/lf` while **28** files were `w/crlf` in
-the working tree (`lib/approval.js`, `lib/client.js`, `lib/review.js`, most of `tooling/`). Re-materialising
+2026-10-25 `git ls-files --eol` reported every tracked blob as `i/lf` while dozens of files were
+`w/crlf` in the working tree (`lib/approval.js`, `lib/client.js`, `lib/review.js`, most of `tooling/`)
+— run that command for the current list, because the set changes with every checkout and edit. Re-materialising
 a file's endings — a fresh checkout, a restore from an LF session log (exactly what the recovery did), an
 editor normalising on save — therefore changed the digest with **no text change**, so status said `stale`
 and COMMIT/HANDOFF refused an artefact the review had approved; during that recovery almost every recorded
@@ -416,21 +417,35 @@ initially refused because `ui` was depth 1 and `logic` depth 2, and the fix was 
 downgrade but to raise `ui` to `logic`'s depth and add a human check, because a renderer is executable code
 *and* unmeasurable here. **VERIFIED** — V01–V27 all KILLED. `NEXT-STEPS.md:33–50, 128–168`.
 
-### A `git status` cross-check is not a security boundary — the framework does not reconcile the file list
-A framework-side cross-check of the author's `changed_files` against `git status --porcelain` was built on
-a WIP branch and then **dropped before landing** (P2.B1+). Three measured reasons. **(1)** `git status`
-reports only **uncommitted** changes, so a committed path is invisible; it is a convenience check, not a
-security boundary. **(2)** Its default runner captured git through piped stdio, which the DSH sandbox
-denies (`spawnSync git EPERM`), so in the installed environment the check could not run: it fell back to
-the declared list and reported `NOT CHECKED`, and the review still proceeded. **(3)** Its marginal
-completeness value over an independent reviewer instructed to run `git status` did not justify 649
-implementation lines plus roughly 1,240 lines / 24 tests in the WIP branch's governance test file, and four
-failed reviews. The landed design is **reviewer-side**: the author is told to run
-`git status --porcelain` before review, and the independent reviewer is told to run it and report any
-omitted path as an issue. **VERIFIED** that the reviewer prompt contains that instruction
-(`test/governance.test.mjs`); the framework-side cross-check is not present. An honest model can still
-miss generated or renamed files — the reviewer-side check reduces that far more cheaply, but it is an
-instruction, not an enforced boundary. See [DESIGN.md §11.3](DESIGN.md#113-why-the-framework-does-not-reconcile-the-declared-file-list).
+### A `git status` cross-check is evidence, not a security boundary
+The reviewer-side instruction stands, and the framework now reconciles the declared file list too — as
+**evidence**, never as a security boundary. `lib/git-changes.js` reads `git status` through an argv
+array (never a shell), `lib/tools.js` folds a declared-omitted path into the evidence, `lib/review.js`
+renders a `## Git cross-check of the changed-file list` section for the reviewer, and a bounded
+`git_cross_check` row is persisted with the verdict. **VERIFIED** — the reviewer prompt contains the
+instruction and the cross-check rows are asserted, both in `test/governance.test.mjs`.
+
+The cross-check was first built on a WIP branch and **dropped before landing** at that point (P2.B1+),
+then re-landed on 2026-10-25 with a fix beside each measured reason:
+
+- **`git status` reports only uncommitted changes**, so a committed path is invisible; it is a
+  convenience check, not a security boundary. The re-landed check adds what it can see to the evidence
+  but still requires the declaration, and a capped scan is reported as `complete: false` rather than
+  as an authoritative empty answer.
+- **Its default runner captured git through piped stdio**, which the DSH sandbox denies
+  (`spawnSync git EPERM`), so in the installed environment the check could not run: it fell back to
+  the declared list and reported `NOT CHECKED`, and the review still proceeded. The re-landed version
+  uses `execFileSync` with an argv array.
+- **Its marginal completeness value over an independent reviewer instructed to run `git status` did
+  not justify 649 implementation lines plus roughly 1,240 lines / 24 tests** in the WIP branch's
+  governance test file, and four failed reviews. The re-landed version reports rather than enforces,
+  which is the division of labour the first round landed.
+
+So both halves exist: the author is told to run `git status --porcelain` before review, the independent
+reviewer is told to run it and report any omitted path as an issue, and the framework folds an omitted
+path into the evidence the reviewer sees. An honest model can still miss generated or renamed files —
+the reviewer-side check reduces that far more cheaply, and neither half is an enforced boundary. See
+[DESIGN.md §11.3](DESIGN.md#113-why-the-cross-check-is-evidence-not-a-security-boundary).
 
 ### Editing a reviewed file in a later feature stales an earlier PASS
 A docs feature that edits `README.md`, `CONTRIBUTING.md` or `docs/TESTING.md` — files an earlier feature
@@ -624,11 +639,13 @@ without a deployment; now `planSync({ src, dst, include, checkOnly })` takes bot
 copies nothing in check mode. **VERIFIED** — `test/eol.test.mjs` (a CRLF copy yields `differ: []` with the
 file listed as EOL-only; a real edit is still a difference; copy mode leaves an EOL-only file byte-untouched
 and still copies a real edit and a file the profile lacks); with `compareFile` reverted to
-`rawSource.equals(rawTarget)` the suite went **637 / 628 pass / 2 fail**, the two failures being these
-tests. One end-to-end `--check` against a throwaway profile (`DSH_PROFILE_DIR` redirected; the real profile
-was never touched) printed `same text (line endings differ only) lib\eol.js` and
-`check complete: 55 differ, 2 already identical (1 of those differ only in line endings)`. Binary files keep
-byte identity; the fix deliberately does not hide a difference, only an ending style. Source:
+`rawSource.equals(rawTarget)` the suite went red on exactly these two tests (the totals at that moment
+are not restated: they move with every test added). One end-to-end `--check` against a throwaway
+profile (`DSH_PROFILE_DIR` redirected; the real profile was never touched, and the throwaway profile
+was **seeded with two files**) printed `same text (line endings differ only) lib\eol.js` and a
+`check complete:` summary whose identical count includes that file. The exact totals depend on the
+checkout and are deliberately not restated; the seeding is what makes the line meaningful. Binary
+files keep byte identity; the fix deliberately does not hide a difference, only an ending style. Source:
 `tooling/sync-plan.mjs`, `lib/eol.js`.
 
 ### A subagent cannot open a human interaction

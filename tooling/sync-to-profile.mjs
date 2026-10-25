@@ -8,8 +8,10 @@
 //
 // THE VERDICT LIVES IN `sync-plan.mjs`, ON PURPOSE. Identity is decided there on the TEXT
 // (line endings folded), because this checkout really does hold both styles: `git ls-files
-// --eol` reports 28 `w/crlf` files whose blobs are `i/lf`. A byte-exact comparison called
-// that a difference, so `--check` printed DIFFERS for a copy that was the same text — see
+// --eol` reports files whose working tree is `w/crlf` while the blob is `i/lf`. The set grows
+// as files are added and changes when an editor rewrites one, so run that command for the
+// current list rather than trusting a count in a comment. A byte-exact comparison called
+// such a file a difference, so `--check` printed DIFFERS for a copy that was the same text — see
 // docs/PITFALLS.md §10. Keeping the decision in a module also makes it testable without
 // writing into the profile, which this file must not do in `--check` mode.
 //

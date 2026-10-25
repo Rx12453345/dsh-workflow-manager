@@ -2,9 +2,10 @@
  * Content identity across line-ending styles: the review fingerprint and `sync --check`.
  *
  * THE FAILURE THIS DEFENDS, AND WHY IT IS REAL HERE. In this checkout every tracked blob is
- * LF in the git index (`git ls-files --eol` reports `i/lf`) while 28 files are CRLF in the
- * working tree (`w/crlf`: `lib/approval.js`, `lib/client.js`, `lib/review.js`, the
- * `tooling/mutation-check*.mjs` harnesses, ... measured 2026-10-25 on recovery/p2b1-content).
+ * LF in the git index (`git ls-files --eol` reports `i/lf`) while dozens of files are CRLF in
+ * the working tree (`w/crlf`: `lib/approval.js`, `lib/client.js`, `lib/review.js`, the
+ * `tooling/mutation-check*.mjs` harnesses, ... measured 2026-10-25 on recovery/p2b1-content;
+ * the count moves as files are added, so run the command for the current set).
  * The same text therefore reaches a hash or a comparison as either style, and the two
  * byte-comparing consumers each gave a false answer: the review fingerprint made an
  * unchanged file report STALE (COMMIT/HANDOFF then refuse it), and `sync --check` printed

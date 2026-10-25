@@ -176,9 +176,10 @@ workflow_review feature="…" acceptance=[…] changed_files=[…] diff="…" se
 The only property that matters: **whoever did the work cannot declare it done.** Before calling it, run
 `git status --porcelain` and include every changed path in `changed_files`. The reviewer prompt tells the
 reviewer to run the same command and compare it with your list; a changed path that is missing is an
-issue, scored against `scope`, `tests` or `correctness`. That cross-check is **reviewer-side** — the
-framework does not reconcile the list itself, and `git status` sees only **uncommitted** changes, so a
-committed path is invisible and this is not a security boundary.
+issue, scored against `scope`, `tests` or `correctness`. The framework also reconciles the declaration
+with `git status` itself (`lib/git-changes.js`) and adds a path it reports and your list omits to the
+evidence. That is **evidence, not a security boundary**: `git status` sees only **uncommitted**
+changes, so a committed path is invisible and must still be declared.
 
 Fix what the review locates, then review again with an incremented `round`. Read the verdict correctly:
 

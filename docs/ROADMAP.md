@@ -40,9 +40,10 @@ Each line names the evidence, not an assurance.
 one. At the end of the journal, `verification.policy`, the conversation tab, the sidebar panel and its
 layout fix, work-unit isolation, the self-deployment exemption and the project tab's effective-config
 view were all recorded as **not yet in the installed copy**. The P2.B1+ batch on `fix/p2b1-plus` — the
-harness sandbox fix, governance + docs fast lane, reviewer-side working-tree check and bootstrap fix — is
-**committed but not deployed and not exercised on a real host**. The framework-side cross-check from that
-batch was dropped (see "Deliberately not implemented").
+harness sandbox fix, governance + docs fast lane, reviewer-side working-tree check and bootstrap fix —
+was deployed in the 0.3.0 build on 2026-10-25. The framework-side cross-check from that batch was
+dropped at that point and **re-landed later**; see "A framework-side cross-check of `changed_files`
+against `git status` — RESOLVED (2026-10-25)" below.
 
 ---
 

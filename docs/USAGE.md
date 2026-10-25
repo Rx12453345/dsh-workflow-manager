@@ -127,10 +127,12 @@ and `HANDOFF` recheck every reviewed feature, not just the selected one, and ref
 Legacy or diff-only evidence is `UNKNOWN`, never fresh.
 
 Before the review starts, the author is told to run `git status --porcelain` and declare every changed
-path. The reviewer is told to run the same command and report any path that is missing from the list. This
-is a **reviewer-side** check: `git status` sees only uncommitted changes, so it is a completeness aid, not
-a security boundary. If a later change edits a file an earlier PASS covered, that earlier PASS becomes
-`stale` and must be reviewed again.
+path. The reviewer is told to run the same command and report any path that is missing from the list, and
+the framework reconciles the declaration with `git status` itself (`lib/git-changes.js`), adding an
+omitted path to the evidence. That cross-check is **evidence, not a security boundary**: `git status`
+sees only uncommitted changes, so a committed path is invisible and must still be declared. If a later
+change edits a file an earlier PASS covered, that earlier PASS becomes `stale` and must be reviewed
+again.
 
 A reviewer child that stops with `error` or `aborted` is retried **at most once**; the result reports
 `attempts` and `stopReason`, and `workflow_review` prints the retry record after its PASS/FAIL line.

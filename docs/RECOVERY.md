@@ -96,12 +96,13 @@ about its central premise. These are the corrections, with how they were establi
    never assumes `lstat` alone settles it in either direction. This is recorded in
    [`docs/PITFALLS.md`](PITFALLS.md); the review-sandbox guards use the native realpath and the
    `Dirent` flag.
-3. **What is deployed, measured.** The installed plugin's `lib/` and `tooling/` are byte-identical
-   (modulo line endings) to commit **`3d6dd16`** — the build synced at about 14:44–14:46 (its files'
-   mtimes precede the 14:46:13 commit). Everything after
-   it (`22d94a1` line-ending folding, `fa24adf`, `a99a2c9`, `b9f2ce7`, `8322f6e`, `b7f13a1` and this
-   change) is **not** in the running copy. In particular the running plugin hashes raw bytes, which
-   is why review verdicts recorded through it can read STALE after a re-materialisation.
+3. **What is deployed, measured (2026-10-25).** The plugin is **0.3.0 in both install roots**
+   (`~/.dsh/plugins/src-12453345_-dsh-workflow` and the desktop profile's `node_modules`), and the
+   status banner reads 0.3.0, so the running copy is the tree this record accompanies (modulo line
+   endings). It replaced the build that matched commit **`3d6dd16`**: the earlier measurement — `lib/`
+   and `tooling/` byte-identical to `3d6dd16` (the build synced at about 14:44–14:46, its files'
+   mtimes preceding the 14:46:13 commit), with everything after it absent from the running copy — is
+   superseded by the 0.3.0 sync.
 
 ## 4. Current state (2026-10-25)
 
@@ -113,9 +114,9 @@ about its central premise. These are the corrections, with how they were establi
 - **Other sensors:** `node run-smoke-test.mjs` → `smoke test passed`;
   `node run-config-check.mjs` → two `OK` lines (every patch value matches its code default; resolved
   `maxDepth` is 2).
-- **CI:** the last pushed commit of this branch (`a99a2c9`) is **green on Node 22 and Node 24**
-  (GitHub Actions run `40174716744`, both jobs `success`). The later commits have **not** been pushed
-  and therefore have **no CI result**.
+- **CI:** the branch head `e93175b` is pushed and **green on Node 22 and Node 24** (measured
+  2026-10-25). The suite totals are not restated here because they move with every test added; the
+  dated local run is the figure above.
 - **The transactional review guard** (`c0cdc5c`, `lib/review-sandbox.js`): before a reviewer starts,
   the project is snapshotted into an isolated temp root as a real copy; the reviewer is pointed at
   that copy; when the child finishes the real project is re-scanned, deletions are restored
@@ -125,9 +126,9 @@ about its central premise. These are the corrections, with how they were establi
   outside the copy), and no reviewer starts if a snapshot cannot be built. The cases in
   `test/review-isolation.test.mjs` include an incident replay that deletes the project through a
   junction and requires every byte back.
-- **Version:** `package.json` is **0.3.0** (this record accompanies the bump from 0.2.0). The
-  **deployed** build's `package.json` still says 0.2.0; the checkout version is not a claim that a
-  0.3.0 build was released.
+- **Version:** `package.json` is **0.3.0**, and the deployed build is the same 0.3.0 (the banner
+  reads 0.3.0 in both install roots). It is still not a published release: no 0.3.0 build was
+  published.
 
 ### 4.1 P3-1 re-verification (verbatim, 2026-10-25)
 
@@ -175,22 +176,23 @@ unflagged run is the honest NOT RUN — exit 2 is not a pass and must not be rea
   `workflow_gc action=add`, which asks the user for confirmation; this session has no human channel
   (`approval.strength: llm-only`). The stats / handoff-doc / policy parts can be exercised offline;
   the constraint confirmation cannot.
-- **The post-deploy re-review batch.** The running plugin is the pre-EOL-fold build (§3.3), so every
-  review recorded through it hashes raw bytes; once the EOL-folding build (`22d94a1`) is deployed and
-  DSH is restarted, every recorded PASS must be re-reviewed against the current bytes and recorded
-  again. Two features already read **STALE** before that deploy — `p3-2-eol` and
-  `p3-4-governance-mutant` — because their reviewed sets include `docs/ROADMAP.md`, which later
-  commits edited. Do **not** re-review them before the deploy: the deploy would stale the new PASS
-  again. Repair them in one batch after it.
-- **`p3-6-docs-caveats` is not closed.** Its docs fixes are committed (`b7f13a1`), but the review
-  chain used its whole two-round budget: round 1 PASS, round 2 FAIL on two documentation defects that
-  are fixed in that commit. A fresh budget must re-review the current bytes before the feature can be
-  recorded complete.
+- **The post-deploy re-review batch — done for the completed set.** Before the 0.3.0 deploy the
+  running plugin was the pre-EOL-fold build, so reviews recorded through it hashed raw bytes and
+  **three** features read **STALE** — `p3-2-eol`, `p3-4-governance-mutant` and `p3-5-code-minors` —
+  because their reviewed sets include `docs/ROADMAP.md` and the other documents later commits edited.
+  The EOL-folding build is deployed now, and those three plus `recovery-baseline` were re-reviewed
+  and recorded against the current bytes after it. The rule still holds for any later edit: a
+  recorded PASS means *this text*, so re-review after changing a reviewed file.
+- **`p3-6-docs-caveats` is not closed.** Its docs fixes are committed (`b7f13a1`) and the docs-truth
+  pass extends them; the earlier review chain used its whole two-round budget (round 1 PASS, round 2
+  FAIL on two documentation defects fixed in that commit), so this pass re-reviews the current bytes
+  as a fresh sequence, round 1. The feature is recorded complete only from that verdict.
 - **Push and deploy are the human's.** `git push` is refused by the gate (a remote-https pipe is
   denied under `workspace-write`, and `danger-full-access` is disproportionate for publishing one
-  branch); deploying is `tooling/sync-to-profile.mjs` plus a DSH restart, run by a human. This
-  session did neither.
+  branch); deploying is `tooling/sync-to-profile.mjs` plus a DSH restart, run by a human. The user
+  pushed `e93175b` and deployed 0.3.0 on 2026-10-25; an agent in this workspace does not push or
+  deploy, and later deploys remain the human's step.
 - **Scratch evidence is not durable.** `.tmp/` holds the recovery tooling (the decompressor, the
   operation indexer, the replay scripts, 57 decompressed logs) and is git-ignored. It explains how
-  every recovered file was produced, but it is not part of the repository and may be deleted once the
-  push is confirmed.
+  every recovered file was produced, but it is not part of the repository and may be deleted — the
+  push is confirmed (`e93175b`).

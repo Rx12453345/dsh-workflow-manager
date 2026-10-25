@@ -6,10 +6,12 @@ Entries are grouped by the date the work landed; the version line is the one rec
 Version recorded in `package.json`: **0.3.0**.
 
 `0.3.0` is the **recovered checkout**: the tree rebuilt from the session logs (see
-[`docs/RECOVERY.md`](docs/RECOVERY.md)) plus the P3 changes, which is a different thing from a
-released build. It was **not** deployed as 0.3.0; the installed plugin still runs the build from
-commit `3d6dd16`, whose `package.json` says `0.2.0`. "Deployed" below is measured against that build,
-not against this version number.
+[`docs/RECOVERY.md`](docs/RECOVERY.md)) plus the P3 changes. It was **deployed as 0.3.0 on
+2026-10-25** to both install roots (`~/.dsh/plugins/…` and the desktop profile's `node_modules`), and
+the status banner reads `0.3.0`; it replaced the build from commit `3d6dd16`, whose `package.json` says
+`0.2.0`. It is still not a published release: no 0.3.0 build was published. Entries below that say
+"not deployed" record the state when they were written; the 0.3.0 deploy is the later sync that
+carried them.
 
 Deployment is not uniform: a `file:` dependency is a **copy, not a symlink**, so implemented work is not
 live until it has been synced and DSH restarted.
@@ -21,9 +23,9 @@ live until it has been synced and DSH restarted.
 ### Changed — the checkout is version 0.3.0
 
 `package.json` moved from 0.2.0 to 0.3.0. The recovered tree plus the P3 changes is a different
-artefact from the 0.2.0 release and from the installed `3d6dd16` build, so it needs a version of its
-own. This is a **checkout** version, not a released or deployed one: the installed build's package
-still says 0.2.0, and no 0.3.0 build was published. It records that the tree now carries the
+artefact from the 0.2.0 release and from the `3d6dd16` build, so it needs a version of its own. It is
+not a published release: no 0.3.0 build was published. It **is** the deployed version — 0.3.0 was
+synced to both install roots on 2026-10-25 (see the header). It records that the tree now carries the
 P1/P2/B1+ code, the P3 hardening and the recovery — none of which were in the 0.2.0 release.
 
 ### Recovered — the lost workspace
@@ -136,8 +138,9 @@ carries the marker this plugin wrote; the canary outside the copy must survive. 
 be built (unreadable tree, escaping link, size caps, failed copy) means **no reviewer starts**, and a
 snapshot is kept when it is the only remaining copy.
 
-New module `lib/review-sandbox.js`; 15 tests in `test/review-isolation.test.mjs`, including an incident
-replay that deletes the project through a junction and requires every byte back. Mutation check (manual,
+New module `lib/review-sandbox.js`; every case lives in `test/review-isolation.test.mjs` (the count
+is not restated here because it moves with each added case), including an incident replay that deletes
+the project through a junction and requires every byte back. Mutation check (manual,
 throwaway copy): removing the restore → 3 red; ignoring the contaminated fence → 4 red; removing the
 reparse-point delete guard → 1 red.
 
@@ -148,9 +151,10 @@ reparse-point delete guard → 1 red.
 ## 2026-10-25 — P2 governance (deployed at `3d6dd16`)
 
 These are user-visible changes on top of 0.2.0. They were written before a deployment and were synced
-later: the installed build matches commit `3d6dd16`, which contains this code (measured 2026-10-25,
-modulo line endings). The checkout has since moved past that build, so "deployed" here means that
-build, not the current tree.
+later: the build at that point matched commit `3d6dd16`, which contains this code (measured 2026-10-25,
+modulo line endings). The checkout has since moved past that build, and the 0.3.0 build is now the
+installed one in both roots, so this code is live in the current copy; `3d6dd16` was its first
+deployment.
 
 ### Added
 

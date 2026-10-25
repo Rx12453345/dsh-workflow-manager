@@ -218,8 +218,9 @@ byte-for-byte**. `mutation-check-governance.mjs` is the one exception to that sh
 project into a unique `%TEMP%` directory and runs the mutant THERE, so no mutant is ever written into
 the canonical `lib/` (the shared lock is still taken, and `lib/tools.js` and `lib/advance.js` are
 verified byte-for-byte). Its check line is `canonical sources unchanged ... YES` rather than
-`sources restored byte-for-byte: YES`. Everything else — the lock, the named-test requirement and the
-exit codes — is the same.
+`sources restored byte-for-byte: YES`. The lock is the same, but the harnesses are not identical
+elsewhere: the approval harness has no `must:` list — it requires an `expect:` regex to match the
+run's output — and the governance harness has an exit 3 when a canonical source changed while it ran.
 
 **The captured child now runs inside the DSH Windows sandbox.** Each harness captures its child's
 output through temp files (`tooling/child-output.mjs`) instead of a pipe, because the sandbox denies a
@@ -290,13 +291,15 @@ round:           1 (increment after a fix)
 - Every issue carries `reachable` and `reach`; **only reachable defects block**.
 - `observations` are records that do not affect the verdict.
 
-**The reviewer checks the working tree itself.** The prompt's step 4 tells the reviewer to run
-`git status --porcelain` in the project and compare it with the author's `changed_files`; any changed
-path missing from that list is an issue, scored against `scope`, `tests` or `correctness`. This is
-**reviewer-side**: the framework does not reconcile the list itself, and `git status` only sees
-**uncommitted** changes, so a committed path is invisible and this is not a security boundary. A real
-framework-side design would need a base-commit diff, not `git status` (see
-[DESIGN.md §11.3](DESIGN.md#113-why-the-framework-does-not-reconcile-the-declared-file-list)).
+**The reviewer checks the working tree itself, and the framework reconciles the list too.** The prompt's
+step 4 tells the reviewer to run `git status --porcelain` in the project and compare it with the author's
+`changed_files`; any changed path missing from that list is an issue, scored against `scope`, `tests` or
+`correctness`. The framework also reads `git status` through an argv array (`lib/git-changes.js`) and
+adds a path the declaration omitted to the evidence, so the reviewer sees the omission without having to
+find it. Both are **evidence, not a security boundary**: `git status` only sees **uncommitted** changes,
+so a committed path is invisible and must still be declared. A real framework-side design would need a
+base-commit diff, not `git status` (see
+[DESIGN.md §11.3](DESIGN.md#113-why-the-cross-check-is-evidence-not-a-security-boundary)).
 
 **The PASS is bound to a fingerprint, so a later edit stales it.** `workflow_status` reports
 `fresh` / `stale` / `unknown`, and `COMMIT`/`HANDOFF` refuse a stale PASS. The consequence that catches
