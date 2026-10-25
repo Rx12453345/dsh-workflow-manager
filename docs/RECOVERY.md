@@ -96,20 +96,22 @@ about its central premise. These are the corrections, with how they were establi
    never assumes `lstat` alone settles it in either direction. This is recorded in
    [`docs/PITFALLS.md`](PITFALLS.md); the review-sandbox guards use the native realpath and the
    `Dirent` flag.
-3. **What is deployed (measured 2026-10-25).** The plugin is **0.3.0 in both install roots**
-   (`~/.dsh/plugins/src-12453345_-dsh-workflow` and the desktop profile's `node_modules`), and the
-   status banner reads 0.3.0. The deployed *text* is the **`e93175b` build, not the tree this record
-   accompanies**: `node tooling/sync-to-profile.mjs --check` reported five differing files when this
-   note was written — `lib/advance.js`, `lib/eol.js`, `tooling/mutation-check-governance.mjs`,
-   `tooling/sync-to-profile.mjs`, `README.md` — and they are real text differences, not line endings
-   (the check folds line endings and reports those separately). That command is the standing check;
-   the list above is that day's reading. The build replaced the one matching commit **`3d6dd16`**:
-   then `lib/` and `tooling/` were byte-identical to `3d6dd16` (synced at about 14:44–14:46, its
-   files' mtimes preceding the 14:46:13 commit).
+3. **Deployment as this record stood (2026-10-25).** On that day the plugin was **0.3.0 in both
+   install roots** (`~/.dsh/plugins/src-12453345_-dsh-workflow` and the desktop profile's
+   `node_modules`) and the status banner read 0.3.0. The deployed *text* was then the **`e93175b`
+   build, not the tree this record accompanies**: `node tooling/sync-to-profile.mjs --check` reported
+   five differing files — `lib/advance.js`, `lib/eol.js`, `tooling/mutation-check-governance.mjs`,
+   `tooling/sync-to-profile.mjs`, `README.md` — real text differences, not line endings (the check
+   folds line endings and reports those separately). That build had replaced the one matching commit
+   **`3d6dd16`**: then `lib/` and `tooling/` were byte-identical to `3d6dd16` (synced at about
+   14:44–14:46, its files' mtimes preceding the 14:46:13 commit). It is history, not a current fact:
+   run `node tooling/sync-to-profile.mjs --check` for today's reading, and read the gitignored
+   `handoff/P3-STATUS.md` for live state. This document records what happened and how to check it.
 
-## 4. Current state (2026-10-25)
+## 4. How to check the state (not restated here)
 
-- **Branch:** `recovery/p2b1-content`, the only development branch; commits sit directly on it.
+- **Branch:** development sits directly on one branch, `recovery/p2b1-content`; `git status -sb`
+  reads the branch, the upstream and the ahead count today.
 - **Unit suite:** `node run-unit-tests.mjs` (Node v24.18.0 inside the DSH sandbox) must exit 0 with
   no failures. Seven cases skip in a sandbox: five mutation-lock race cases, the Chromium layout
   measurement, and the pre-existing Windows `SIGTERM` limitation. A skip is not a pass — see
@@ -119,10 +121,9 @@ about its central premise. These are the corrections, with how they were establi
   `node run-config-check.mjs` → two `OK` lines (every patch value matches its code default; resolved
   `maxDepth` is 2).
 - **CI:** CI runs on a push to the remote branch (`.github/workflows/ci.yml`: Node 22 and 24 on
-  `windows-latest`, `npm test` → smoke → config check). The last recorded green run is `40181670412`,
-  for the pushed tip `e93175b`; commits made after that tip have no run until they are pushed. Read
-  `git status -sb` for the ahead count and the Actions page for the run; the suite totals are not
-  restated here because they move with every test added.
+  `windows-latest`, `npm test` → smoke → config check). No run id and no pushed tip is recorded
+  here: read `git status -sb` for the ahead count, the Actions page for the run covering the current
+  tip, and that run for the totals, which move with every test added.
 - **The transactional review guard** (`c0cdc5c`, `lib/review-sandbox.js`): before a reviewer starts,
   the project is snapshotted into an isolated temp root as a real copy; the reviewer is pointed at
   that copy; when the child finishes the real project is re-scanned, deletions are restored
@@ -132,9 +133,9 @@ about its central premise. These are the corrections, with how they were establi
   outside the copy), and no reviewer starts if a snapshot cannot be built. The cases in
   `test/review-isolation.test.mjs` include an incident replay that deletes the project through a
   junction and requires every byte back.
-- **Version:** `package.json` is **0.3.0**, and the deployed build is the same 0.3.0 (the banner
-  reads 0.3.0 in both install roots). It is still not a published release: no 0.3.0 build was
-  published.
+- **Version:** read it from `package.json`; this document does not restate it, because it moves.
+  What is *installed* is a different question — `node tooling/sync-to-profile.mjs --check` answers it.
+  It is still not a published release: no 0.3.0 build was published.
 
 ### 4.1 P3-1 re-verification (verbatim, 2026-10-25)
 
@@ -182,13 +183,11 @@ unflagged run is the honest NOT RUN — exit 2 is not a pass and must not be rea
   `workflow_gc action=add`, which asks the user for confirmation; this session has no human channel
   (`approval.strength: llm-only`). The stats / handoff-doc / policy parts can be exercised offline;
   the constraint confirmation cannot.
-- **The post-deploy re-review batch — one is owed.** Reviews recorded through the pre-EOL-fold build
-  read **STALE** for `p3-2-eol`, `p3-4-governance-mutant` and `p3-5-code-minors`, because their reviewed
-  sets include `docs/ROADMAP.md` and the other documents later commits edited. The EOL-folding build is
-  deployed, and `p3-2-eol` has been re-reviewed and recorded against the current bytes; re-recording the
-  other completed features against the current text is still owed. The rule holds for any later edit: a
-  recorded PASS means *this text*, so re-review after changing a reviewed file. `workflow_status` is the
-  check — it reports every recorded PASS whose files changed as STALE.
+- **A recorded PASS means *this text*.** Reviews recorded through an older build read **STALE** as soon
+  as a reviewed file changes, because their reviewed sets include `docs/ROADMAP.md` and the other
+  documents later commits edit. So the rule is mechanical: re-review and re-record after changing a
+  reviewed file. Whether any record is currently fresh is not stated here — `workflow_status` answers
+  it, reporting every recorded PASS whose files changed as STALE.
 - **`p3-6-docs-caveats` is not closed.** Its docs fixes are committed (`b7f13a1`) and the docs-truth
   pass extends them; the earlier review chain used its whole two-round budget (round 1 PASS, round 2
   FAIL on two documentation defects fixed in that commit), so this pass re-reviews the current bytes

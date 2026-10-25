@@ -8,8 +8,10 @@ Version recorded in `package.json`: **0.3.0**.
 `0.3.0` is the **recovered checkout**: the tree rebuilt from the session logs (see
 [`docs/RECOVERY.md`](docs/RECOVERY.md)) plus the P3 changes. It was **deployed as 0.3.0 on
 2026-10-25** to both install roots (`~/.dsh/plugins/…` and the desktop profile's `node_modules`), and
-the status banner reads `0.3.0`; it replaced the build from commit `3d6dd16`, whose `package.json` says
-`0.2.0`. It is still not a published release: no 0.3.0 build was published. Entries below that say
+at that point the status banner read `0.3.0`; it replaced the build from commit `3d6dd16`, whose
+`package.json` says `0.2.0`. It is still not a published release: no 0.3.0 build was published. That
+deploy is history, not a current fact — `node tooling/sync-to-profile.mjs --check` reads what is
+installed now, and the gitignored `handoff/P3-STATUS.md` carries live state. Entries below that say
 "not deployed" record the state when they were written; the 0.3.0 deploy is the later sync that
 carried them.
 
@@ -24,9 +26,10 @@ live until it has been synced and DSH restarted.
 
 `package.json` moved from 0.2.0 to 0.3.0. The recovered tree plus the P3 changes is a different
 artefact from the 0.2.0 release and from the `3d6dd16` build, so it needs a version of its own. It is
-not a published release: no 0.3.0 build was published. It **is** the deployed version — 0.3.0 was
-synced to both install roots on 2026-10-25 (see the header). It records that the tree now carries the
-P1/P2/B1+ code, the P3 hardening and the recovery — none of which were in the 0.2.0 release.
+not a published release: no 0.3.0 build was published. It **was** the version deployed on 2026-10-25,
+when 0.3.0 was synced to both install roots (see the header); check what is installed now with
+`node tooling/sync-to-profile.mjs --check`. It records that the tree carries the P1/P2/B1+ code, the
+P3 hardening and the recovery — none of which were in the 0.2.0 release.
 
 ### Recovered — the lost workspace
 
@@ -107,9 +110,9 @@ runs the real suite in a unique `%TEMP%` copy, so no mutant can reach the canoni
 integrity line `canonical sources unchanged ... YES` checks `lib/tools.js` and `lib/advance.js`
 byte-for-byte. It still takes the shared `tooling/.mutation-lock` like every other harness. Its verdict
 logic is itself pinned by `test/governance-mutation.test.mjs` (a red baseline, a crash with no passing
-test, and red-for-the-wrong-test are each NOT a catch). Measured 2026-10-25: baseline green (0 fail,
-7 skip), G01–G07 all CAUGHT. `lib/review.js` now discovers it, so a change to `lib/advance.js`
-or `lib/tools.js` names it in the harness plan.
+test, and red-for-the-wrong-test are each NOT a catch). Measured 2026-10-25: baseline green, G01–G07
+all CAUGHT (read the harness output for the counts). `lib/review.js` now discovers it, so a change to
+`lib/advance.js` or `lib/tools.js` names it in the harness plan.
 
 ### Fixed — a review can no longer destroy the project it reviews
 
