@@ -12,6 +12,27 @@ live until it has been synced and DSH restarted.
 
 ## [Unreleased] — 2026-10-25
 
+### Fixed — the small defects routed from the P3 reviews
+
+- **Snapshot cleanup keeps trying for longer.** The guarded delete now retries 8 × 250 ms and Node
+  backs off linearly, so the window is ~9 s instead of ~1.8 s (the old 5 × 120 ms); a reviewer's
+  own `npm test` children were still holding the copy after the shorter window. It stays bounded,
+  and a failure still reports the path to delete. A test pins the window, the fact that the delete
+  guards run BEFORE the delete is attempted, and the reported path.
+- **`sync-to-profile.mjs`'s exit code is now a pinned contract.** An absent `DSH_WORKFLOW_SRC`
+  exits 1 with `the workspace root does not exist`; the old script printed `absent:` and exited 0,
+  which made a mistyped root look like a clean run. `test/sync-to-profile.test.mjs` holds it.
+- **The changed-files alias test can now fail.** The fixture is a junction ancestor instead of an
+  uppercased path (which `path.win32.relative` folds), so reverting `canonicalPath` reproduces the
+  `..\..\` bug on any Windows machine rather than passing.
+- **Docs no longer restate drifting test totals.** The stale 576/569 figures in README, TESTING,
+  CONTRIBUTING and ROADMAP say "0 fail" instead, which is the only number that must not drift.
+- **Housekeeping:** `collectGitChanges` owns its JSDoc again; `sync-plan.mjs` no longer exports its
+  internal `walk`, reuses `sameTextContent`, and its `mkdir` comment states the measured truth
+  (`fs.cp` creates missing destination parents); the governance harness's `PASSEED` typo is fixed,
+  its exit-code collision with the lock refusal is documented with why it is kept, and the lock
+  probe's GREEN rule is aligned with it.
+
 ### Added — mutation coverage for HANDOFF governance, the waiver and the docs fast lane
 
 `tooling/mutation-check-governance.mjs` adds seven mutants for the rules `test/governance.test.mjs`

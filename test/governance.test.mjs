@@ -20,9 +20,19 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, openSync, closeSync } from 'node:fs'
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmdirSync,
+  rmSync,
+  openSync,
+  closeSync,
+  symlinkSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 
 import {
   TRANSITIONS,
@@ -856,7 +866,7 @@ test('collectGitChanges reads a real repository, and framework state is not code
   }
 })
 
-test('collectGitChanges accepts an 8.3/case-aliased spelling of the project', t => {
+test('collectGitChanges accepts a project whose path has a JUNCTION ancestor', t => {
   // GIT PRINTS CANONICAL PATHS; THE CALLER'S SPELLING IS NOT NECESSARILY THE SAME. GitHub's
   // Windows runners hand out %TEMP% as `C:\Users\RUNNER~1\...`, and `resolve()` keeps that
   // spelling while `git rev-parse --show-toplevel` returns `C:\Users\runneradmin\...`. Every
@@ -864,21 +874,46 @@ test('collectGitChanges accepts an 8.3/case-aliased spelling of the project', t 
   // changed paths" while claiming to be COMPLETE — an authoritative-looking empty answer that
   // silently removed the evidence a declared subset is meant to be checked against.
   // Measured on CI run 40172196645: 12 governance tests failing exactly this way.
+  //
+  // WHY A JUNCTION AND NOT AN UPPERCASED SPELLING. The old fixture uppercased the project path,
+  // but `path.win32.relative` folds case, so that spelling was still inside the project — the
+  // test stayed green even with `canonicalPath` reverted, which is exactly the regression it was
+  // supposed to catch. A junction ancestor is a REAL alias the OS does not fold: `resolve()`
+  // keeps the link spelling while the filesystem resolves to the target, so the defect reproduces
+  // on any Windows machine (8.3 names are disabled on some volumes).
   if (process.platform !== 'win32') {
-    t.skip('path aliasing is a Windows property')
+    t.skip('junction aliases are a Windows property')
     return
   }
   const repo = makeRepo(t)
   if (repo === null) return
+  const holder = mkdtempSync(join(tmpdir(), 'dsh-wf-junction-'))
+  const link = join(holder, 'alias')
   try {
-    const aliased = repo.dir.toUpperCase()
-    assert.notEqual(aliased, repo.dir, 'the test needs a genuinely different spelling')
+    // The junction points at the project's PARENT, so the aliased project path is
+    // `holder\alias\<repoName>` — the alias really is an ANCESTOR of the reviewed directory.
+    symlinkSync(dirname(repo.dir), link, 'junction')
+    const aliased = join(link, basename(repo.dir))
+    assert.ok(
+      relative(aliased, repo.dir).startsWith('..'),
+      'the alias must be a genuinely non-canonical spelling: a relative path from it lands outside',
+    )
+    assert.notEqual(aliased, repo.dir)
+
     const git = collectGitChanges(aliased, { run: repo.run })
     assert.equal(git.checked, true, git.reason)
     assert.equal(git.complete, true, git.reason)
     assert.deepEqual(git.paths, ['README.md', 'lib/approval.js'])
     assert.equal(git.outsideProject, 0, 'no path may look like it lives outside the project')
   } finally {
+    try {
+      // A junction is removed with rmdir; a recursive delete is the thing this module must
+      // never do untested.
+      rmdirSync(link)
+    } catch {
+      // already gone
+    }
+    rmSync(holder, { recursive: true, force: true })
     rmSync(repo.dir, { recursive: true, force: true })
     rmSync(repo.run.scratch, { recursive: true, force: true })
   }

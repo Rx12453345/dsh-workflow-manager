@@ -48,6 +48,7 @@ import { DEFAULT_DIMENSIONS, renderIsolation, runReview } from '../lib/review.js
 import {
   SNAPSHOT_CANARY_NAME,
   SNAPSHOT_MARKER_NAME,
+  SNAPSHOT_REMOVE_RETRY,
   createReviewSnapshot,
   removeReviewSnapshot,
   verifyReviewSnapshot,
@@ -549,6 +550,84 @@ test('the canary must survive, or the delete is reported as unsafe', t => {
   assert.equal(removed.kept, true)
   assert.equal(removed.path, snapshot.rootDir)
   assert.equal(existsSync(join(project, 'src', 'a.js')), true, 'the project is untouched')
+})
+
+test('the guarded delete uses the longer, bounded retry window and names the path when it still fails', t => {
+  // THE FAILURE THIS PINS. A reviewer that ran `npm test` left its children holding the copy, and
+  // the delete lost the race: the snapshot was kept (correct) but the window was short — Node's
+  // `rmSync` backs off linearly, so the old 5 x 120 ms was only 1.8 s in total. The window is now
+  // longer and still bounded, and the failure must name the path a human has to delete.
+  const project = makeProject(t)
+  const snapshot = createReviewSnapshot(project)
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch {
+      // best effort
+    }
+  })
+
+  const { maxRetries, retryDelay } = SNAPSHOT_REMOVE_RETRY
+  assert.ok(maxRetries > 5, `maxRetries ${maxRetries} must exceed the old 5`)
+  assert.ok(retryDelay > 120, `retryDelay ${retryDelay} ms must exceed the old 120 ms`)
+  const windowMs = (retryDelay * maxRetries * (maxRetries + 1)) / 2
+  assert.ok(windowMs > 1_800, `the total wait ${windowMs} ms must exceed the old ~1.8 s window`)
+  assert.ok(windowMs <= 15_000, `the total wait ${windowMs} ms must stay bounded`)
+
+  const calls = []
+  const removed = removeReviewSnapshot(snapshot, {
+    rm(path, options) {
+      calls.push({ path, options })
+      throw Object.assign(new Error('EPERM: still held by the reviewer test runner'), { code: 'EPERM' })
+    },
+  })
+
+  // The retry loop lives inside `rmSync`; what this module owns is the options it hands over.
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].path, snapshot.workDir)
+  assert.equal(calls[0].options.recursive, true)
+  assert.equal(calls[0].options.force, true)
+  assert.equal(calls[0].options.maxRetries, maxRetries, 'the exported window is the one used')
+  assert.equal(calls[0].options.retryDelay, retryDelay, 'the exported window is the one used')
+  assert.equal(removed.ok, false)
+  assert.equal(removed.kept, true)
+  assert.equal(removed.path, snapshot.workDir, 'a kept copy must be findable by path')
+  assert.match(removed.reason, /could not be removed/)
+  assert.equal(existsSync(snapshot.workDir), true, 'the copy is still there for the human to delete')
+})
+
+test('the delete guards run BEFORE the recursive delete is attempted at all', t => {
+  // A test seam for the delete function must not become a way around the guards: a copy that
+  // contains a link is refused before the seam is ever called.
+  const project = makeProject(t)
+  const snapshot = createReviewSnapshot(project)
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  const planted = join(snapshot.workDir, 'planted-link')
+  symlinkSync(project, planted, 'junction')
+  t.after(() => {
+    try {
+      rmdirSync(planted)
+    } catch {
+      // already gone
+    }
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch {
+      // best effort
+    }
+  })
+
+  let called = false
+  const removed = removeReviewSnapshot(snapshot, {
+    rm() {
+      called = true
+    },
+  })
+  assert.equal(called, false, 'a refused copy must never reach the recursive delete')
+  assert.equal(removed.ok, false)
+  assert.match(removed.reason, /link/)
+  assert.equal(existsSync(snapshot.workDir), true)
 })
 
 test('the report says the project was verified, and says it the honest way', async t => {

@@ -129,7 +129,7 @@ Runs in seconds. Run it after **every** change.
 
 ```powershell
 cd <plugin>
-node run-unit-tests.mjs                       # expect: 576 tests, 575 pass, 0 fail, 1 skipped (normal terminal)
+node run-unit-tests.mjs                       # expect: 0 fail (skips are environment-gated; see below)
 node run-smoke-test.mjs                       # expect "smoke test passed"
 node run-config-check.mjs                     # expect 2 OK lines
 $env:DSH_TOOLS_BUNDLE = '<extracted>/dsh-tools/lib/index.js'; node tooling/validate-tool-definition.mjs
@@ -142,11 +142,12 @@ node tooling/sync-to-profile.mjs --check      # expect 0 differ
 `DSH_PROFILE_DIR` overrides the profile (default `~/.dsh/profiles/desktop`). The two shipped-bundle
 tools require the extracted host packages, because those bundles are not vendored here.
 
-The current **576 tests / 575 pass / 0 fail / 1 skipped** is the figure measured from this repository in a
-normal terminal. In the DSH sandbox the runner sets `DSH_WORKFLOW_SANDBOX=1`, so six environment-dependent
-tests skip as well: **576 tests / 569 pass / 0 fail / 7 skipped** (measured in the sandbox). The single
-non-sandbox skip is a Windows limitation (the platform has no catchable `SIGTERM`), not a failing case. Test
-counts drift as work lands; **the failure count is the number that must be zero.**
+The suite must be green in both environments. **The failure count is the number that must be zero;
+test counts drift as work lands, so they are not restated here.** In a normal terminal the only skip
+is a Windows limitation (the platform has no catchable `SIGTERM`), not a failing case. In the DSH
+sandbox the runner sets `DSH_WORKFLOW_SANDBOX=1`, so the environment-dependent tests skip as well —
+the ones that need a piped child (denied with `EPERM`) or the Chromium layout browser — and each skip
+is reported with its reason rather than counted as a pass.
 
 `tooling/check-config-schema.mjs` needs schemastery, so run it from the profile directory.
 

@@ -38,7 +38,7 @@
  *   mutant is reported NOT RUN and the harness exits 2. This is the P3-3 lesson — a mutant that
  *   is only "red" because the suite never started looks identical to a caught one.
  *
- *   CAUGHT        the suite was RED, at least one test PASSEED next to the failing ones, and every
+ *   CAUGHT        the suite was RED, at least one test PASSED next to the failing ones, and every
  *                 test named in `must` is among the failures. A crash or load error exits nonzero
  *                 with no passing test and is NOT a catch.
  *   SURVIVED      the mutant ran GREEN: a missing test, not a pass (exit 1).
@@ -52,7 +52,14 @@
  *   0  real run, every mutant CAUGHT as declared (`caught=N/N`)
  *   1  a surviving mutant, a red-for-the-wrong-test mutant, an unusable anchor, or an unknown
  *      mutant id requested on the command line
- *   2  NOT RUN — the baseline is not green or a run produced no test result; not a pass
+ *   2  NOT RUN — the baseline is not green or a run produced no test result; not a pass.
+ *      THE SAME NUMBER IS ALSO THE LOCK REFUSAL: `EXIT_LOCK_HELD` (imported from
+ *      `tooling/mutation-lock.mjs`) is 2 as well, because another harness holds the shared
+ *      lock and this run never started. The two are distinguished by the message — the lock
+ *      case prints `<label>: <holder message>` and nothing about a baseline or a mutant. The
+ *      collision is kept rather than renumbered because 2 already means "no run happened" in
+ *      every harness here, and renumbering one harness would let a caller read the old 2 as
+ *      "NOT RUN" when it now means something else. Neither reading is ever a pass.
  *   3  integrity failure: a canonical source changed while the harness ran (never expected)
  *
  * Usage: node tooling/mutation-check-governance.mjs [id ...]
@@ -197,6 +204,16 @@ function occurrences(haystack, needle) {
  * The mutation suites are captured through FILE descriptors (the sandbox denies a pipe), which
  * gives the spec reporter, not TAP. Both a present count and a missing summary are meaningful:
  * a run with no summary line must never be mistaken for a green one.
+ *
+ * WHY THESE THREE HELPERS ARE NOT SHARED WITH `mutation-check-lock-probe.mjs`. The probe's own
+ * header says it is "a temporary probe, run once and deleted: it is not part of the shipped
+ * tooling"; making this shipped harness import from it would hand a throwaway file a permanent
+ * contract (and the reverse cannot work either, because the probe's copy has no failing-test
+ * names). The two copies HAD diverged: the probe treated `status === 0` alone as GREEN while
+ * this harness also requires `fail === 0`. The divergence is now removed — the probe was
+ * aligned to the stricter rule and `test/lock-probe.test.mjs` pins it — so the two copies say
+ * the same thing. If the probe is ever promoted out of temporary status, extract ONE
+ * `tooling/mutation-verdict.mjs` instead of keeping two copies; do not add a third.
  *
  * @param {string} output - the child's stdout+stderr.
  * @returns {{tests: number|null, pass: number|null, fail: number|null, skipped: number|null, executed: number}}

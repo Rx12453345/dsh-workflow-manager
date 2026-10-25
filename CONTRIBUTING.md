@@ -43,8 +43,8 @@ Layer 4 does not substitute for layer 1, and layer 1 cannot substitute for layer
 ### 1. The offline suite
 
 ```powershell
-npm test                                     # expect: 0 fail (normal 576/575/0/1; sandbox 576/569/0/7)
-npm run test:sandbox                         # force the sandbox profile; the six environment tests skip with a reason
+npm test                                     # expect: 0 fail (skips are environment-gated; see docs/TESTING.md)
+npm run test:sandbox                         # force the sandbox profile; the environment-dependent tests skip with a reason
 node run-smoke-test.mjs                      # expect: "smoke test passed"
 node run-config-check.mjs                    # expect: two OK lines, and "resolved maxDepth is 2"
 $env:DSH_TOOLS_BUNDLE = '<extracted>/dsh-tools/lib/index.js'; node tooling/validate-tool-definition.mjs

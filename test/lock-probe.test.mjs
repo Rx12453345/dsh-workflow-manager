@@ -104,6 +104,17 @@ test('classifyRun: a failing test next to a passing one is RED', () => {
   assert.equal(classifyRun(ok(PASS_OUTPUT)).verdict, 'GREEN')
 })
 
+test('classifyRun: exit 0 with a failure count is NOT RUN, not GREEN', () => {
+  // The governance harness required `fail === 0`; this probe used to read `status === 0` alone as
+  // GREEN, so the two copies of the verdict helper disagreed. Exit 0 with failing tests is a
+  // contradictory result, not evidence — it must not be counted as a surviving mutant either way.
+  const inconsistent = { status: 0, signal: null, error: null, stdout: FAIL_OUTPUT, stderr: '' }
+  const classification = classifyRun(inconsistent)
+  assert.equal(classification.verdict, 'NOT RUN')
+  assert.match(classification.reason, /exited 0 without a failing test next to a passing one/)
+  assert.match(classification.detail, /exit 0, tests 30, pass 25, fail 2/)
+})
+
 test('runProbe: a suite that cannot start reports every mutant NOT RUN and exits 2', () => {
   const { lines, log } = recorder()
   const report = runProbe({ log, runTests: () => spawnFailure() })

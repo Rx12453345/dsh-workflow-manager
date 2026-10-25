@@ -182,20 +182,25 @@ export function classifyRun(run) {
       reason: `no test executed (${detail}); a skipped or unloadable file is not evidence`,
     }
   }
-  if (run.status === 0) {
+  // ALIGNED WITH `mutation-check-governance.mjs` (P3-5): "exit 0" alone is not a green when the
+  // summary reports failures. That combination is contradictory rather than evidence, so it
+  // falls through to NOT RUN instead of being read as a surviving mutant.
+  if (run.status === 0 && (summary.fail ?? 0) === 0) {
     return { verdict: 'GREEN', summary, detail, reason: detail }
   }
   // A red run is a caught mutant only when a test failed NEXT TO a passing one. A crash before
   // the tests (load error, uncaught throw in the harness) exits nonzero with no passing test,
-  // and calling that "caught" is the same false evidence in a new costume.
-  if ((summary.fail ?? 0) > 0 && (summary.pass ?? 0) > 0) {
+  // and calling that "caught" is the same false evidence in a new costume. `status !== 0` is
+  // explicit so an exit-0 result that nevertheless reports failures is NOT RUN (contradictory,
+  // not evidence) — the same rule as `mutation-check-governance.mjs`.
+  if (run.status !== 0 && (summary.fail ?? 0) > 0 && (summary.pass ?? 0) > 0) {
     return { verdict: 'RED', summary, detail, reason: detail }
   }
   return {
     verdict: 'NOT RUN',
     summary,
     detail,
-    reason: `the suite exited nonzero without a failing test next to a passing one (${detail}); a crash or load error is not a caught mutant`,
+    reason: `the suite exited ${run.status} without a failing test next to a passing one (${detail}); a crash or load error is not a caught mutant`,
   }
 }
 

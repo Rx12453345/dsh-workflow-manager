@@ -17,6 +17,12 @@
 //   (default) copy this checkout -> the profile's installed copy
 //   --check   report differences without writing
 //   DSH_WORKFLOW_SRC / DSH_PROFILE_DIR override the two roots.
+//
+// CONTRACT, PINNED BY test/sync-to-profile.test.mjs: an absent DSH_WORKFLOW_SRC (or an absent
+// default checkout root) is a hard ERROR — exit 1 with `the workspace root does not exist` on
+// stderr. It is NOT a clean run. The old script printed `absent:` and exited 0, which made a
+// wrong DSH_WORKFLOW_SRC look like "nothing to do"; changing that exit code was deliberate, and
+// the test is what keeps it from drifting back.
 
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'

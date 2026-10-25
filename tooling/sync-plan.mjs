@@ -21,10 +21,10 @@ import { existsSync } from 'node:fs'
 import { cp, mkdir, readdir, readFile, stat } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 
-import { normaliseLineEndings } from '../lib/eol.js'
+import { sameTextContent } from '../lib/eol.js'
 
-/** Every file below `root`, as paths relative to `root`. */
-export async function walk(root, prefix = '') {
+/** Every file below `root`, as paths relative to `root`. Internal: `planSync` is the surface. */
+async function walk(root, prefix = '') {
   const out = []
   for (const entry of await readdir(join(root, prefix), { withFileTypes: true })) {
     const rel = prefix ? join(prefix, entry.name) : entry.name
@@ -49,7 +49,7 @@ export async function walk(root, prefix = '') {
 export async function compareFile(source, target) {
   if (!existsSync(target)) return { present: false, same: false, eolOnly: false }
   const [rawSource, rawTarget] = await Promise.all([readFile(source), readFile(target)])
-  const same = normaliseLineEndings(rawSource).equals(normaliseLineEndings(rawTarget))
+  const same = sameTextContent(rawSource, rawTarget)
   return {
     present: true,
     same,
@@ -98,8 +98,15 @@ export async function planSync({ src, dst, include, checkOnly = false }) {
           result.differ.push(label)
           continue
         }
-        // The target's own directory, not just the entry root: a file that does not exist
-        // yet in a nested directory (`lib/components/panel/...`) needs its parents made.
+        // The target's own directory, not just the entry root: a file that does not exist yet
+        // in a nested directory (`lib/components/panel/...`) needs its parents made.
+        //
+        // MEASURED CORRECTION (P3-5): the original comment here claimed `fs.cp` does NOT create
+        // missing destination directories. That is wrong — on the Node measured here (v24.18)
+        // `cp` creates them itself (copying a file to `a/b/dst.txt` where `a` does not exist
+        // succeeds). The call is therefore BELT AND BRACES, not a requirement: it is
+        // idempotent, and it states the precondition explicitly instead of relying on an
+        // undocumented implementation detail of `cp`. Behaviour is unchanged either way.
         await mkdir(dirname(target), { recursive: true })
         await cp(source, target)
         result.copied.push(label)
