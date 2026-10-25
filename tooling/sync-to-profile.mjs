@@ -6,16 +6,24 @@
 // Forgetting this step produces the worst kind of bug report: "I fixed it and
 // nothing changed".
 //
+// THE VERDICT LIVES IN `sync-plan.mjs`, ON PURPOSE. Identity is decided there on the TEXT
+// (line endings folded), because this checkout really does hold both styles: `git ls-files
+// --eol` reports 28 `w/crlf` files whose blobs are `i/lf`. A byte-exact comparison called
+// that a difference, so `--check` printed DIFFERS for a copy that was the same text — see
+// docs/PITFALLS.md §10. Keeping the decision in a module also makes it testable without
+// writing into the profile, which this file must not do in `--check` mode.
+//
 // Usage:  node sync-to-profile.mjs [--check]
 //   (default) copy this checkout -> the profile's installed copy
 //   --check   report differences without writing
 //   DSH_WORKFLOW_SRC / DSH_PROFILE_DIR override the two roots.
 
-import { cp, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { planSync } from './sync-plan.mjs'
 
 const SRC = process.env.DSH_WORKFLOW_SRC ?? resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PROFILE_DIR = process.env.DSH_PROFILE_DIR ?? join(homedir(), '.dsh', 'profiles', 'desktop')
@@ -30,65 +38,33 @@ const INCLUDE = ['lib', 'tooling', 'package.json', 'cordis.patch.yml', 'README.m
 
 const checkOnly = process.argv.includes('--check')
 
-async function walk(root, prefix = '') {
-  const out = []
-  for (const entry of await readdir(join(root, prefix), { withFileTypes: true })) {
-    const rel = prefix ? join(prefix, entry.name) : entry.name
-    if (entry.isDirectory()) out.push(...(await walk(root, rel)))
-    else out.push(rel)
-  }
-  return out
+if (!existsSync(SRC)) {
+  // Not an error to paper over: a wrong DSH_WORKFLOW_SRC would otherwise "sync" nothing and
+  // report a clean run, which is the exact failure this script exists to prevent.
+  console.error(`sync: the workspace root does not exist: ${SRC}`)
+  process.exit(1)
 }
 
-let copied = 0
-let identical = 0
-const missing = []
+const report = await planSync({ src: SRC, dst: DST, include: INCLUDE, checkOnly })
 
-for (const entry of INCLUDE) {
-  const from = join(SRC, entry)
-  if (!existsSync(from)) {
-    missing.push(`${entry} (absent in workspace)`)
-    continue
-  }
-  const info = await stat(from)
-  if (info.isDirectory()) {
-    for (const rel of await walk(join(SRC, entry))) {
-      const source = join(SRC, entry, rel)
-      const target = join(DST, entry, rel)
-      const same =
-        existsSync(target) && (await readFile(source)).equals(await readFile(target))
-      if (same) {
-        identical += 1
-        continue
-      }
-      if (!checkOnly) {
-        await mkdir(join(DST, entry), { recursive: true })
-        await cp(source, target)
-      }
-      copied += 1
-      console.log(`${checkOnly ? 'DIFFERS' : 'copied '} ${relative(DST, target)}`)
-    }
-  } else {
-    const target = join(DST, entry)
-    const same = existsSync(target) && (await readFile(from)).equals(await readFile(target))
-    if (same) {
-      identical += 1
-      continue
-    }
-    if (!checkOnly) {
-      await mkdir(DST, { recursive: true })
-      await cp(from, target)
-    }
-    copied += 1
-    console.log(`${checkOnly ? 'DIFFERS' : 'copied '} ${entry}`)
-  }
+for (const label of report.copied) console.log(`copied  ${label}`)
+for (const label of report.differ) console.log(`DIFFERS ${label}`)
+// Same text, different line endings: reported so the byte-level fact is not hidden, but not
+// counted as a difference and never copied just to rewrite endings.
+for (const label of report.eolOnly) {
+  console.log(`${checkOnly ? 'same text' : 'not copied'} (line endings differ only) ${label}`)
 }
 
+const moved = checkOnly ? report.differ.length : report.copied.length
 console.log(
-  `\n${checkOnly ? 'check' : 'sync'} complete: ${copied} ${checkOnly ? 'differ' : 'copied'}, ${identical} already identical`,
+  `\n${checkOnly ? 'check' : 'sync'} complete: ${moved} ${checkOnly ? 'differ' : 'copied'}, ` +
+    `${report.identical.length} already identical` +
+    (report.eolOnly.length > 0
+      ? ` (${report.eolOnly.length} of those differ only in line endings)`
+      : ''),
 )
-if (missing.length) console.log(`absent: ${missing.join(', ')}`)
-if (copied > 0 && !checkOnly) {
+if (report.missing.length) console.log(`absent: ${report.missing.join(', ')}`)
+if (report.copied.length > 0 && !checkOnly) {
   console.log('\nRESTART DSH for the Host half — and hard-reload the window for the browser half:')
   console.log('  F12 -> Network -> Disable cache -> F5')
 }

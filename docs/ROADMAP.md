@@ -271,14 +271,6 @@ through the file-backed child capture.
 **What it would take.** Run them in a normal terminal (the documented path), or find a headless engine the
 sandbox permits.
 
-### `sync --check` can report a CRLF/LF difference that is not a change
-`tooling/sync-to-profile.mjs --check` compares bytes with `Buffer.equals` (lines 59 and 73), so a
-line-ending-only difference is reported as `DIFFERS` even when the text is identical; running the sync
-then copies the workspace bytes over and the difference disappears with no behavioural change. **Known,
-unfixed.** It is the safe direction — it cannot hide a real difference — but it erodes trust in the one
-read-only check that must stay believable. **What it would take.** A comparison that normalises `\r\n`/`\n`
-for the verdict while still reporting the byte-level difference.
-
 ### Reviewer step 4 says to compare with a list that may be absent
 When `workflow_review` is called with no `changed_files`, `buildReviewPrompt` omits the "Files the author
 says changed" section, but step 4 still reads "compare it with the files the author listed above" — there

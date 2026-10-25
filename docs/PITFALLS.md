@@ -162,6 +162,27 @@ revert the later edits", and persist the `diff` so a second call reproduces the 
 names the real cause rather than wrongly saying "the files were changed". A passed verdict is cleared on any
 transition other than `→ COMMIT`. **VERIFIED.** `NEXT-STEPS.md:1342–1353, 1409–1415`.
 
+### A CRLF checkout staled a review of the same text — **FIXED**
+The fingerprint hashed the reviewed files' raw bytes, and this repository holds **both** styles: on
+2026-10-25 `git ls-files --eol` reported every tracked blob as `i/lf` while **28** files were `w/crlf` in
+the working tree (`lib/approval.js`, `lib/client.js`, `lib/review.js`, most of `tooling/`). Re-materialising
+a file's endings — a fresh checkout, a restore from an LF session log (exactly what the recovery did), an
+editor normalising on save — therefore changed the digest with **no text change**, so status said `stale`
+and COMMIT/HANDOFF refused an artefact the review had approved; during that recovery almost every recorded
+edit that failed to match came from log-LF versus checkout-CRLF. Fix: `lib/eol.js` folds `\r\n` and a lone
+`\r` to `\n` for identity checks only, and `fingerprint` hashes the normalised bytes. Two properties keep it
+honest: **LF content is returned as the same Buffer**, so every digest recorded before the fix keeps its
+value (only a CRLF file's digest moves — which was the bug; a review recorded BEFORE this fix over a file
+that was CRLF then rechecks as stale once, and this project has no such row), and **binary content (any NUL
+byte) is left byte-exact**, since folding 0x0D inside a PNG or a `.zst` would corrupt identity in the name
+of fixing it.
+The reviewed `diff` is deliberately not folded: it is stored as one string in the evidence and re-supplied
+from that same record, so it cannot drift the way the working tree can. **VERIFIED** — `test/eol.test.mjs`:
+one file hashes identically from LF and CRLF bytes and still moves on an edit; a CRLF rewrite of a reviewed
+file keeps `reviewFreshness` `fresh` while a one-character edit still reports `stale`; a binary file stays
+byte-exact. With the normaliser call removed the suite went **637 tests / 628 pass / 2 fail / 7 skipped**,
+the two failures being exactly those fingerprint and freshness tests.
+
 ### Four defects only a real host found
 With the offline suite fully green: **(1)** seven declared dimensions scoring 7 plus four *undeclared* ones
 scoring 10 gave `passed: true, overall 8.09`; **(2)** `workspace_dir` silently dropped (§3);
@@ -403,9 +424,11 @@ instruction, not an enforced boundary. See [DESIGN.md §11.3](DESIGN.md#113-why-
 
 ### Editing a reviewed file in a later feature stales an earlier PASS
 A docs feature that edits `README.md`, `CONTRIBUTING.md` or `docs/TESTING.md` — files an earlier feature
-covered — invalidates that earlier feature's PASS, because the fingerprint hashes the reviewed bytes.
+covered — invalidates that earlier feature's PASS, because the fingerprint hashes the reviewed **text**
+(line endings folded, §4: a line-ending-only rewrite of the same text does not stale it, anything else
+does).
 `workflow_status` then reports `stale`, and `COMMIT`/`HANDOFF` refuse it. This is not a routing bug to
-work around: it is what makes a PASS mean *these bytes*, and a PASS that survives arbitrary later edits is
+work around: it is what makes a PASS mean *this text*, and a PASS that survives arbitrary later edits is
 exactly the claim-not-evidence failure the fingerprint exists to prevent. Fix at the planning level: scope
 an edit to the feature that owns the file, or budget a **re-review** of the earlier feature. **Observed on
 this repository** — the P2.B1+ `docs-truth` pass stales the `harness-sandbox` PASS on `README.md`,
@@ -573,17 +596,30 @@ never merged. The comparator self-tests each run, and an injected wrong expectat
 call as self-deployment is wrong, and reads only the **first** destination argument, with `unknown` counting
 as not earned. **VERIFIED.** `NEXT-STEPS.md:2690–2758`.
 
-### `sync --check` can report a CRLF/LF difference that is not a change — KNOWN, UNFIXED
-`tooling/sync-to-profile.mjs --check` decides identity by byte-exact comparison
-(`readFile(source).equals(readFile(target))`, lines 59 and 73). A line-ending-only difference — workspace
-LF, installed copy CRLF, or the reverse — is therefore reported as `DIFFERS` / `n differ` even though the
-text is semantically identical, and running the sync then copies the workspace bytes over and makes the
-"difference" vanish without any behavioural change. The trap is concluding that a real change was pending,
-or that the sync repaired something. It is a false alarm in the safe direction (it never hides a real
-difference), but it erodes trust in `--check`, which is the one read-only step that must stay believable.
-**Known, unfixed.** The fix is a content comparison that normalises `\r\n`/`\n` for the *verdict* while
-still reporting the byte-level difference, so "same text, different endings" is distinct from "different
-text". Source: `tooling/sync-to-profile.mjs`.
+### `sync --check` reported a CRLF/LF difference that was not a change — **FIXED**
+`tooling/sync-to-profile.mjs --check` decided identity by byte-exact comparison
+(`readFile(source).equals(readFile(target))`), so a line-ending-only difference — workspace LF, installed
+copy CRLF, or the reverse — printed `DIFFERS` / `n differ` although the text was identical, and running the
+sync then rewrote the copy to make the "difference" vanish with no behavioural change. The trap is
+concluding a real change was pending, or that the sync repaired something. It was a false alarm in the safe
+direction (it never hid a real difference), which is precisely why it survived: it eroded trust in
+`--check`, the one read-only step that must stay believable. Fix: the decision moved into
+`tooling/sync-plan.mjs`, which compares the **text** (via `lib/eol.js`) while still reporting the byte-level
+fact — `same text (line endings differ only) <path>` — and the summary counts those separately
+(`n already identical (m of those differ only in line endings)`), so "same text, different endings" is
+distinct from "different text" instead of being quietly folded together. An EOL-only file is also no longer
+copied, so a sync does not churn the installed tree for nothing. The module split is part of the fix: the
+old script did its work at import time and wrote into the profile, so its verdict could not be tested
+without a deployment; now `planSync({ src, dst, include, checkOnly })` takes both roots as arguments and
+copies nothing in check mode. **VERIFIED** — `test/eol.test.mjs` (a CRLF copy yields `differ: []` with the
+file listed as EOL-only; a real edit is still a difference; copy mode leaves an EOL-only file byte-untouched
+and still copies a real edit and a file the profile lacks); with `compareFile` reverted to
+`rawSource.equals(rawTarget)` the suite went **637 / 628 pass / 2 fail**, the two failures being these
+tests. One end-to-end `--check` against a throwaway profile (`DSH_PROFILE_DIR` redirected; the real profile
+was never touched) printed `same text (line endings differ only) lib\eol.js` and
+`check complete: 55 differ, 2 already identical (1 of those differ only in line endings)`. Binary files keep
+byte identity; the fix deliberately does not hide a difference, only an ending style. Source:
+`tooling/sync-plan.mjs`, `lib/eol.js`.
 
 ### A subagent cannot open a human interaction
 Any mechanism requiring a human answer before writing fails inside a delegated child — this plugin's
