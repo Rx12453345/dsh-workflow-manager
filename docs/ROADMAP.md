@@ -157,10 +157,32 @@ net as a real one.
 **What it would take.** A scheduler in the host half, plus the decision of who triggers it (the plugin
 has no background loop).
 
-### A framework-side cross-check of `changed_files` against `git status`
-**Not implemented, and the prototype was dropped rather than shipped.** The idea was to have the framework
+### The YAML recipe model in `DESIGN.md` §9.2
+`DESIGN.md` §9.2 shows a recipe as a YAML document with `bases`, `steps`, `disable` and `budget` keys.
+That document is **design intent, not implemented**: no code parses it. What exists is a `recipe`
+**name** validated against five literals (`hotfix`, `spike`, `refactor`, `docs`, `review`) in
+`lib/config.js:RECIPES`, and one phase-machine difference in `lib/advance.js:RECIPE_TRANSITIONS` —
+`docs` adds `BUILD → EVALUATE` and skips `VERIFY`. The per-recipe step lists (hotfix's `max_files: 3`,
+spike's `spikes/` output, refactor's structural-only sensors) are not enforced.
+**Why.** The five named recipes are a useful single switch; the YAML step language is a much larger
+feature with no implemented consumer, and enforcing a step list would need its own schema and tests.
+**What it would take.** Parse and validate the recipe document, map each step to a phase action, and
+pump every step with a test — or delete the sketch from `DESIGN.md` so the document describes only
+what runs.
+
+### A framework-side cross-check of `changed_files` against `git status` — **RESOLVED (2026-10-25)**
+**Status now.** The check is implemented. `lib/git-changes.js` reads `git status` through an argv array
+(never a shell), `lib/tools.js` folds a path git reports and the declaration omits into the evidence,
+`lib/review.js` renders a `## Git cross-check of the changed-file list` section, and
+`test/governance.test.mjs` asserts `git_cross_check` rows (see the README's review bullet and the
+CHANGELOG's P2 governance entry). **It remains reviewer-visible evidence, not a security boundary**:
+`git status` sees only uncommitted changes, so a committed path is invisible and must still be declared
+(`DESIGN.md` §11.3).
+
+**The first prototype was dropped rather than shipped.** The idea was to have the framework
 reconcile the author's declared file list with `git status --porcelain`. It was built on a WIP branch,
-failed four independent reviews, and was removed. Three measured reasons:
+failed four independent reviews, and was removed. Three measured reasons — each answered by the
+re-landed version:
 
 - **It is not a security boundary.** `git status` reports only **uncommitted** changes; a committed path
   is invisible, so the check can miss exactly the files that matter most.
@@ -172,9 +194,10 @@ failed four independent reviews, and was removed. Three measured reasons:
   branch's governance test file (part of a 1,908-line file), and four failed reviews, bought marginal
   completeness over an independent reviewer instructed to run `git status`.
 
-**What landed instead.** The author is told to run `git status --porcelain` before review, and the
-reviewer's prompt tells it to run the same command and report omitted paths as issues. That is an
-instruction, not an enforced boundary — an honest model can still miss generated or renamed files.
+**What the first round landed instead.** The author is told to run `git status --porcelain` before
+review, and the reviewer's prompt tells it to run the same command and report omitted paths as issues.
+That instruction still stands and now sits alongside the re-landed framework check; on its own it is
+not an enforced boundary — an honest model can still miss generated or renamed files.
 **What a real design would need.** A **base-commit diff** (`git diff <base>...HEAD` plus untracked
 files) parsed and bound into the review fingerprint, with deleted and renamed paths handled explicitly;
 `git status` alone is the wrong primitive.
@@ -268,9 +291,9 @@ suite RED for a NAMED test:
 - G06 the immutable base graph itself gains `BUILD → COMMIT`;
 - G07 the fast lane moves `BUILD → EVALUATE` but is not announced.
 
-Measured 2026-10-25: baseline 651 tests / 644 pass / 0 fail / 7 skip, `G01–G07` all CAUGHT, canonical
-sources unchanged. The verdict logic itself is pinned by `test/governance-mutation.test.mjs` (a red
-baseline, a crash with no passing test and a red-for-the-wrong-test run are all NOT a catch).
+Measured 2026-10-25: baseline green (0 fail, 7 environment-gated skips), `G01–G07` all CAUGHT,
+canonical sources unchanged. The verdict logic itself is pinned by `test/governance-mutation.test.mjs`
+(a red baseline, a crash with no passing test and a red-for-the-wrong-test run are all NOT a catch).
 
 ### The UI mutation harnesses still need a normal terminal
 The three harnesses that exercise a rendered surface — `mutation-check-client.mjs`,

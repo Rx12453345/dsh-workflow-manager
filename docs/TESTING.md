@@ -149,6 +149,33 @@ sandbox the runner sets `DSH_WORKFLOW_SANDBOX=1`, so the environment-dependent t
 the ones that need a piped child (denied with `EPERM`) or the Chromium layout browser — and each skip
 is reported with its reason rather than counted as a pass.
 
+### 1.1 What the DSH sandbox does NOT run — a skip is not a pass
+
+`run-unit-tests.mjs` probes a trivial piped child once. In the DSH Windows sandbox that probe comes
+back `EPERM`, so the runner sets `DSH_WORKFLOW_SANDBOX=1` for the whole test process; the affected
+cases then call `t.skip()` with a visible reason. **They are NOT RUN. They are not green, and a
+`0 fail` summary does not cover them.** Specifically:
+
+- **The Chromium layout measurement is NOT RUN in the sandbox.** The case
+  `the shipped panel grid resolves to one column with a full-width label` in
+  `test/status.test.mjs` drives a headless Chromium through `tooling/layout-styles.mjs`
+  (`measureLayout`), which is the only thing that resolves real grid geometry. The sandbox cannot
+  start that browser, so the case skips there — the *declaration-level* assertions in the same file
+  still run, but **the rendered outcome is unmeasured in the sandbox**. In a normal terminal with a
+  Chromium-family browser it runs; without one it skips with its own reason
+  (`no Chromium-family browser on this machine; the resolved layout was not computed`).
+- **The mutation-lock race cases are NOT RUN in the sandbox.** The cases in
+  `test/mutation-lock.test.mjs` that launch child processes are denied their pipes (`EPERM`) and
+  skip by name.
+- **Everything else runs**, including `test/review.test.mjs`, `test/review-isolation.test.mjs`,
+  `test/governance.test.mjs`, `test/approval.test.mjs` and the rest of `test/status.test.mjs`: they
+  do not need a pipe or a browser. The harnesses that capture a child at all do it through temp
+  files (`tooling/child-output.mjs`), never through a pipe.
+
+So a sandbox run is a real result for the cases it executed and **no result at all** for the ones it
+skipped. Do not record a skipped case as passing, and do not read the sandbox's `0 fail` as "the
+rendered layout was verified".
+
 `tooling/check-config-schema.mjs` needs schemastery, so run it from the profile directory.
 
 **Catches:** pure logic errors; configuration drifting from the code defaults; a tool definition the
@@ -199,10 +226,17 @@ output through temp files (`tooling/child-output.mjs`) instead of a pipe, becaus
 piped child (`EPERM`). The capture is still a real child process with a real exit status; only the
 transport of its stdout/stderr changed. **Verified by the three sandbox runs that previously could not
 start a captured child — `mutation-check-approval.mjs`, `mutation-check-verification.mjs` and
-`mutation-check-work-unit.mjs`** — each reached its mutants and printed its restore line. One environment
-limit remains separate from this: the settings-page, panel and tab harnesses (`mutation-check-client.mjs`,
-`mutation-check-panel.mjs`, `mutation-check-project-tab.mjs`) also run the Chromium layout test, which the
-sandbox cannot launch, so run those three in a normal terminal.
+`mutation-check-work-unit.mjs`** — each reached its mutants and printed its restore line.
+
+**The three UI harnesses cannot be judged in the sandbox.** `mutation-check-client.mjs`,
+`mutation-check-panel.mjs` and `mutation-check-project-tab.mjs` run `test/status.test.mjs`, which
+includes the Chromium layout measurement. The suite runner skips that case in-sandbox (Layer 1.1),
+but these harnesses spawn the test file directly and **do not set `DSH_WORKFLOW_SANDBOX`** — so an
+in-sandbox run reaches the browser launch, which the sandbox cannot complete. That is an
+**environment failure, not a caught mutant**, and the harness does not yet classify it as NOT RUN
+(the still-open UI-harness gap). **Run those three in a normal terminal**, and read an in-sandbox run
+of them as no evidence about the rendered layout. The gap is tracked in
+[ROADMAP.md](ROADMAP.md) §"The UI mutation harnesses still need a normal terminal".
 
 > ⚠️ **Never run two of these concurrently.** They rewrite files under `lib/`. Two at once on
 > `lib/client.js` once left **two mutants permanently in the source tree while both processes printed

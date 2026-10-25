@@ -354,6 +354,34 @@ marked do-not-merge), `refactor` (only structural sensors: dependency direction,
 (doc-consistency sensor plus document GC), `review` (read-only: run the evaluator, produce a report,
 change no code).
 
+**Implementation status — the YAML above is a design sketch, not behaviour.** What is implemented is a
+`recipe` **name** validated against five literals (`lib/config.js:RECIPES`): `hotfix`, `spike`,
+`refactor`, `docs`, `review`. The phase machine honours exactly one difference between them
+(`lib/advance.js:RECIPE_TRANSITIONS`): `docs` adds `BUILD → EVALUATE`, so `VERIFY` is skipped. No
+recipe adds `BUILD → COMMIT`, and `VERIFY → COMMIT` exists for every recipe. The `bases`, `steps`,
+`disable` and `budget` keys shown above are design intent — no code reads them, so "hotfix skips
+planning" or "spike output goes under `spikes/`" are **not enforced**. The gap is recorded in
+[ROADMAP.md](ROADMAP.md), not silently implied.
+
+**Which harnesses the DSH sandbox cannot run.** The sandbox is not a second profile: it denies a
+piped child (`EPERM`) and cannot start a Chromium-family browser. So:
+
+- The three UI harnesses — `tooling/mutation-check-client.mjs`, `-panel.mjs`, `-project-tab.mjs` —
+  run `test/status.test.mjs`, whose layout case launches Chromium to measure the grid. The suite
+  runner skips that case in-sandbox, but these harnesses spawn the file directly and do not set
+  `DSH_WORKFLOW_SANDBOX`, so an in-sandbox run reaches the browser launch, which the sandbox cannot
+  complete. That is an **environment failure, not a caught mutant**; run the three in a normal
+  terminal. Classifying that failure as NOT RUN instead of "red" is the still-open UI-harness gap.
+- `tooling/mutation-check-lock-probe.mjs` prints `NOT RUN` and exits **2** in the sandbox unless
+  `DSH_WORKFLOW_SANDBOX=1` is set, because its unmutated baseline cannot be green when the lock
+  tests' piped children are denied. **Exit 2 is not a pass.**
+- The mutation-lock race cases in `test/mutation-lock.test.mjs` skip with a reason.
+
+Everything else runs there, including `test/review.test.mjs` and `test/governance.test.mjs`; the
+harnesses capture their child through temp files (`tooling/child-output.mjs`) instead of a pipe. The
+full statement is [TESTING.md](TESTING.md) Layers 1–2. **A sandbox `0 fail` says nothing about a
+skipped case** — a skip is the absence of a result, not a green one.
+
 The reason a recipe mechanism exists at all is Ashby's law of requisite variety: you can only regulate
 what your model covers, and fixing a topology is itself an act of reducing variety. A recipe makes the
 chosen topology explicit and cheap to change.
@@ -547,22 +575,30 @@ still refused. Every unreadable input fails closed.
 It also cannot authorise its own **first** deployment: the copy running the gate predates the exemption.
 That first copy must be performed out of band. See [ROADMAP.md](ROADMAP.md).
 
-### 11.3 Why the framework does not reconcile the declared file list
+### 11.3 Why the cross-check is evidence, not a security boundary
 
-An early P2.B1 design had the framework cross-check the author's `changed_files` against
-`git status --porcelain`; it was built, failed four independent reviews, and was dropped rather than
-shipped, for three reasons. `git status` reports only **uncommitted** changes, so a committed path is
-invisible and the check is not a security boundary. Its default runner captured git through piped stdio,
-which the DSH sandbox denies (`spawnSync git EPERM`), so in the installed environment the check could not
-run: it fell back to the declared list and reported `NOT CHECKED`. Its marginal completeness value over an
-independent reviewer instructed to run `git status` did not justify 649 implementation lines plus roughly
-1,240 lines / 24 tests in the WIP branch's governance test file, and four failed reviews. The landed design
-is a division of labour: the author is told to run `git status` before review, the independent reviewer is
-told to run it and report omitted paths as issues, and the reviewer — not a byte-level gate — is where the
-judgement lives. That replacement is an instruction, not an enforced boundary: an honest model can still
-miss generated or renamed files, but the reviewer-side check reduces that far more cheaply. A real
-framework-side design, if ever wanted, would need a base-commit diff (`git diff <base>...HEAD` plus
-untracked files) bound into the fingerprint, not `git status`.
+**Status: re-landed (2026-10-25).** The check now runs: `lib/git-changes.js` reads `git status` through
+an argv array (never a shell), `lib/tools.js` folds an omitted path into the classification evidence, and
+`lib/review.js` gives the reviewer a `## Git cross-check of the changed-file list` section; the governance
+tests assert the `git_cross_check` rows. It is **reviewer-visible evidence, not a security boundary**:
+`git status` reports only **uncommitted** changes, so a committed path is invisible and must still be
+declared, and a capped scan is reported as `complete: false` rather than as an authoritative empty answer.
+
+The first attempt is still why the design is shaped this way. An early P2.B1 design had the framework
+cross-check the author's `changed_files` against `git status --porcelain`; it was built, failed four
+independent reviews, and was dropped at that point rather than shipped, for three reasons. `git status`
+reports only **uncommitted** changes, so a committed path is invisible and the check is not a security
+boundary. Its default runner captured git through piped stdio, which the DSH sandbox denies
+(`spawnSync git EPERM`), so in the installed environment the check could not run: it fell back to the
+declared list and reported `NOT CHECKED`. Its marginal completeness value over an independent reviewer
+instructed to run `git status` did not justify 649 implementation lines plus roughly 1,240 lines / 24
+tests in the WIP branch's governance test file, and four failed reviews. What the first round landed was
+a division of labour: the author is told to run `git status` before review, the independent reviewer is
+told to run it and report omitted paths as issues, and the reviewer — not a byte-level gate — is where
+the judgement lives. That instruction still stands alongside the re-landed check; on its own it is an
+instruction, not an enforced boundary: an honest model can still miss generated or renamed files, but the
+reviewer-side check reduces that far more cheaply. A real framework-side design would need a base-commit
+diff (`git diff <base>...HEAD` plus untracked files) bound into the fingerprint, not `git status`.
 
 ---
 

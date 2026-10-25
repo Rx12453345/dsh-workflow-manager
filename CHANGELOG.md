@@ -12,6 +12,52 @@ live until it has been synced and DSH restarted.
 
 ## [Unreleased] — 2026-10-25
 
+### Recovered — the lost workspace
+
+A `workflow_review` reviewer created a directory junction to the workspace and ran a recursive delete;
+Node followed the link and emptied the checkout, taking git history, the `.dsh` state and the
+uncommitted work. The tree was rebuilt from the DSH **session logs**: all 57 workspace logs were
+decompressed, every successful `write`/`edit` was indexed and replayed onto the 0.2.0 tree between the
+0.2.0 commit (`2026-10-24T05:09:29Z`) and the incident (`2026-10-25T04:51Z`), with CRLF normalised
+first (the logs are LF, the checkout is CRLF), and the P0 review-isolation patch merged back with
+`git apply --3way`. This is reconstruction by evidence, **not** a byte-for-byte git restore.
+
+Two corrections to the first handoff, which are the reason it was rewritten: the installed copy it
+called "P2.B1+" was not that baseline — `lib/git-changes.js` existed nowhere on disk, and the deployed
+`lib/` predated the git cross-check entirely (nothing in it referenced `git_cross_check`, while the
+recovered tests exercise it); and the junction facts are narrower than first stated: a junction created
+**inside the DSH sandbox** with `fs.symlinkSync(target, path, 'junction')` (its substitute name
+rewritten to `\??\Global\C:\…`) is invisible to `lstat` (measured: `isSymbolicLink()` false,
+`isDirectory()` true) and to `realpathSync` (it returns the link path itself), while
+`realpathSync.native` resolves the target and `Dirent.isSymbolicLink()` flags the entry — but an
+**ordinary** Windows junction is reported by `lstat` as a symlink and resolved by `realpathSync`, so the
+guard uses native realpath plus Dirent, which see both spellings (see `docs/PITFALLS.md`). Test totals
+are not restated here; they drift.
+
+### Added — the lock probe no longer invents a verdict
+
+`tooling/mutation-check-lock-probe.mjs` captured its child through a piped `spawnSync`. The DSH
+sandbox denies that pipe (`EPERM`), so the child never started, `status` came back `null`, and the
+probe read "nonzero" as "the mutant was caught": it printed `4/4 caught` with zero tests executed.
+It now calls a mutant caught only when a real test failed next to a passing one, runs the unmutated
+baseline first, and reports `NOT RUN` with exit **2** when no honest verdict exists (the sandbox
+without `DSH_WORKFLOW_SANDBOX=1`; a normal terminal runs the real L1–L4 mutants). The exit codes are
+documented as not-a-pass where they are not a pass, and `test/lock-probe.test.mjs` pins the verdict
+classes.
+
+### Fixed — the review fingerprint and `sync --check` are line-ending insensitive
+
+The review fingerprint hashed raw bytes while this checkout holds both styles (every tracked blob is
+`i/lf`, a number of files are `w/crlf` on disk), so re-materialising a file's endings — a fresh
+checkout, a restore from an LF session log, an editor normalising on save — marked an unchanged
+reviewed file STALE and made `COMMIT`/`HANDOFF` refuse an artefact the review had approved. The same
+bug made `tooling/sync-to-profile.mjs --check` print `DIFFERS` for an installed copy that was the same
+text. `lib/eol.js` is now one shared rule: CRLF and a lone CR fold to LF for identity checks only, LF
+content is returned as the same Buffer (so every digest recorded before the change keeps its value),
+and content containing a NUL byte is treated as binary and left byte-exact. The sync decision moved
+into `tooling/sync-plan.mjs`'s `planSync` so it can be tested without a deployment. Pinned by
+`test/eol.test.mjs`.
+
 ### Fixed — the small defects routed from the P3 reviews
 
 - **Snapshot cleanup keeps trying for longer.** The guarded delete now retries 8 × 250 ms and Node
@@ -43,8 +89,8 @@ runs the real suite in a unique `%TEMP%` copy, so no mutant can reach the canoni
 integrity line `canonical sources unchanged ... YES` checks `lib/tools.js` and `lib/advance.js`
 byte-for-byte. It still takes the shared `tooling/.mutation-lock` like every other harness. Its verdict
 logic is itself pinned by `test/governance-mutation.test.mjs` (a red baseline, a crash with no passing
-test, and red-for-the-wrong-test are each NOT a catch). Measured 2026-10-25: baseline 651 / 644 pass /
-0 fail / 7 skip, G01–G07 all CAUGHT. `lib/review.js` now discovers it, so a change to `lib/advance.js`
+test, and red-for-the-wrong-test are each NOT a catch). Measured 2026-10-25: baseline green (0 fail,
+7 skip), G01–G07 all CAUGHT. `lib/review.js` now discovers it, so a change to `lib/advance.js`
 or `lib/tools.js` names it in the harness plan.
 
 ### Fixed — a review can no longer destroy the project it reviews
@@ -148,17 +194,20 @@ been exercised on a restarted real host. It must not be recorded as deployed.
 - The author guidance now tells the author to run `git status --porcelain` before review and declare
   every changed path; the reviewer prompt tells the reviewer to run it and report omitted paths as issues.
 
-### Changed — the framework cross-check was dropped
+### Changed — the first framework cross-check prototype was dropped (later re-landed)
 - A framework-side check of `changed_files` against `git status --porcelain` was prototyped and **not
-  landed**. `git status` sees only uncommitted changes (so it is not a security boundary), its default
+  landed at that point**. `git status` sees only uncommitted changes (so it is not a security boundary), its default
   piped runner is denied in the sandbox (`EPERM`) so the check fell back to the declared list and reported
   `NOT CHECKED`, and its marginal value did not justify 649 implementation lines plus roughly 1,240 lines
-  of tests and four failed reviews. The reviewer-side instruction above replaces it; `docs/DESIGN.md`
-  §11.3 records why a real design would need a base-commit diff.
+  of tests and four failed reviews. The reviewer-side instruction above replaced it then; the check was
+  **re-landed later** with argv-only git execution, evidence addition and a bounded scan — see the
+  "P2 governance" entry above and `docs/DESIGN.md` §11.3, which records why a real design would need a
+  base-commit diff.
 
 ### Testing
-- Unit suite: **576 tests / 569 pass / 0 fail / 7 skipped** in the DSH sandbox; a normal terminal runs the
-  six environment tests and reports **576 / 575 pass / 0 fail / 1 skipped**.
+- Unit suite: **0 fail** in the DSH sandbox; the environment-gated cases skip with a reason (see
+  `docs/TESTING.md` Layer 1.1), and a normal terminal runs them too. Totals drift as work lands, so
+  they are not restated here.
 
 ---
 

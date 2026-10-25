@@ -64,9 +64,11 @@ a dictionary that existed only inside the component factory — legal syntax, ru
 on that path. Fix: run the smoke test, which exercises the real render chain. **VERIFIED.** `USAGE.md §10`.
 `NEXT-STEPS.md:1197–1200`.
 
-### On Windows a junction is invisible to `lstat` and to `realpathSync`
+### In the DSH sandbox a junction is invisible to `lstat` and to `realpathSync`
 Measured on Node v24.18.0 after a reviewer emptied the workspace with a recursive delete through a
-directory junction. A junction created with `symlinkSync(target, path, 'junction')`:
+directory junction. A junction created **inside the DSH sandbox** with
+`symlinkSync(target, path, 'junction')` gets its substitute name rewritten to `\??\Global\C:\…`, and
+then:
 
 - `lstatSync(path).isSymbolicLink()` → **false** (it looks like an ordinary directory);
 - `readlinkSync(path)` → `EINVAL`;
@@ -76,6 +78,14 @@ directory junction. A junction created with `symlinkSync(target, path, 'junction
 - `readdirSync(parent, {withFileTypes:true})`'s `Dirent.isSymbolicLink()` → **true**;
 - `rmSync(path, {recursive:true})` removes only the link, but `rmSync(join(path,'child'), …)` deletes
   **through** it into the target, and `unlinkSync(path)` fails with `EPERM` (use `rmdirSync`).
+
+**An ordinary Windows junction is NOT invisible.** Measured read-only on `C:\Users\Default User` and
+`C:\Documents and Settings` (both reparse tag `0xa0000003`, the same mount-point tag a junction uses):
+`lstatSync().isSymbolicLink()` is **true**, `readlinkSync()` returns the target and `realpathSync()`
+resolves it. So the invisibility above is a property of the **sandbox-rewritten** link, not of every
+junction — a guard that must survive both spellings uses `realpathSync.native` plus
+`Dirent.isSymbolicLink()` and does not assume `lstat` alone settles it in either direction.
+
 A child subagent also inherits the parent's working directory and file policy: a `cwd` in the spawn
 request does not move its sandbox root, and a write into the real project still succeeds. **VERIFIED.**
 `lib/review-sandbox.js`, `test/review-isolation.test.mjs`.
