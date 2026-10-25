@@ -191,8 +191,8 @@ The reviewed `diff` is deliberately not folded: it is stored as one string in th
 from that same record, so it cannot drift the way the working tree can. **VERIFIED** — `test/eol.test.mjs`:
 one file hashes identically from LF and CRLF bytes and still moves on an edit; a CRLF rewrite of a reviewed
 file keeps `reviewFreshness` `fresh` while a one-character edit still reports `stale`; a binary file stays
-byte-exact. With the normaliser call removed the suite went **637 tests / 628 pass / 2 fail / 7 skipped**,
-the two failures being exactly those fingerprint and freshness tests.
+byte-exact. With the normaliser call removed the fingerprint and freshness tests fail and nothing else
+does; the suite totals are not restated because they move with every test added.
 
 ### Four defects only a real host found
 With the offline suite fully green: **(1)** seven declared dimensions scoring 7 plus four *undeclared* ones
@@ -422,8 +422,9 @@ The reviewer-side instruction stands, and the framework now reconciles the decla
 **evidence**, never as a security boundary. `lib/git-changes.js` reads `git status` through an argv
 array (never a shell), `lib/tools.js` folds a declared-omitted path into the evidence, `lib/review.js`
 renders a `## Git cross-check of the changed-file list` section for the reviewer, and a bounded
-`git_cross_check` row is persisted with the verdict. **VERIFIED** — the reviewer prompt contains the
-instruction and the cross-check rows are asserted, both in `test/governance.test.mjs`.
+`git_cross_check` row is persisted with the verdict. **VERIFIED** — the cross-check rows (the declared
+list, the git rows, the bounded-scan flag) are asserted in `test/governance.test.mjs`; the
+reviewer-side instruction is prose in `lib/review.js`, and no test asserts its wording.
 
 The cross-check was first built on a WIP branch and **dropped before landing** at that point (P2.B1+),
 then re-landed on 2026-10-25 with a fix beside each measured reason:
@@ -639,8 +640,9 @@ without a deployment; now `planSync({ src, dst, include, checkOnly })` takes bot
 copies nothing in check mode. **VERIFIED** — `test/eol.test.mjs` (a CRLF copy yields `differ: []` with the
 file listed as EOL-only; a real edit is still a difference; copy mode leaves an EOL-only file byte-untouched
 and still copies a real edit and a file the profile lacks); with `compareFile` reverted to
-`rawSource.equals(rawTarget)` the suite went red on exactly these two tests (the totals at that moment
-are not restated: they move with every test added). One end-to-end `--check` against a throwaway
+`rawSource.equals(rawTarget)` three tests go red — the two above in `test/eol.test.mjs` (`:165` and
+`:196`) and the CLI printing case in `test/sync-to-profile.test.mjs` (`:56`). The totals are not
+restated: they move with every test added. One end-to-end `--check` against a throwaway
 profile (`DSH_PROFILE_DIR` redirected; the real profile was never touched, and the throwaway profile
 was **seeded with two files**) printed `same text (line endings differ only) lib\eol.js` and a
 `check complete:` summary whose identical count includes that file. The exact totals depend on the

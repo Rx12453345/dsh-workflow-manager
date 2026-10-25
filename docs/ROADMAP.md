@@ -283,11 +283,11 @@ defects into that logic, so a regression there could survive with the suite gree
 now closes it with seven mutants, each run in a throwaway `%TEMP%` copy and each required to turn the
 suite RED for a NAMED test:
 
-- G01 the open-feature refusal AND the empty-reason guard removed. Both, because the empty-reason
-  guard reads the reason string rather than the waiver flag: with only the first guard gone, a
-  `waiver_reason` supplied without `waive_open_features` would slip past it, so the single-guard
-  mutant would test that side channel rather than "no waiver at all". The product keeps both guards,
-  and `handoffWaived` requires both arguments;
+- G01 the open-feature refusal AND the empty-reason guard removed. Both, because the mutant has to
+  reach the defect this case is about: with only the first guard gone, a call with no flag and no
+  reason is still refused — by the empty-reason guard, whose message names that requirement instead
+  of the open features — so the named test goes red for a different reason and proves nothing about
+  the refusal itself. The product keeps both guards, and `handoffWaived` requires both arguments;
 - G02 an empty waiver reason accepted;
 - G03 the waiver echoed but never persisted to the workflow state;
 - G04 the `docs` recipe gains an illegal `BUILD → COMMIT` edge;

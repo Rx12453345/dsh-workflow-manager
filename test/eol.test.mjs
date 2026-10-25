@@ -73,9 +73,9 @@ test('CRLF and a lone CR fold to LF, and LF content is returned as the SAME buff
   // THE BACKWARD-COMPATIBILITY GUARANTEE: an LF file is not re-encoded at all, so every digest
   // and comparison recorded before this normaliser existed keeps the value it had.
   const lf = Buffer.from('let x = 1\nlet y = 2\n')
-  // STRICT, not loose: `assert.equal` on two Buffers compares them by VALUE (`==` coerces to a
-  // string), so it would pass for a fresh equal-content Buffer. The claim here is identity — the
-  // SAME object is handed back — and only `strictEqual` asserts `===`.
+  // `strictEqual` because the claim is identity: the SAME object is handed back, not a fresh
+  // Buffer with equal content. (This file imports `node:assert/strict`, so `assert.equal` would
+  // already have compared identity here — the explicit name is what makes the claim legible.)
   assert.strictEqual(normaliseLineEndings(lf), lf, 'LF content must be handed back untouched')
 
   assert.equal(sameTextContent('a\nb', 'a\r\nb'), true)

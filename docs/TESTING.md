@@ -219,8 +219,12 @@ project into a unique `%TEMP%` directory and runs the mutant THERE, so no mutant
 the canonical `lib/` (the shared lock is still taken, and `lib/tools.js` and `lib/advance.js` are
 verified byte-for-byte). Its check line is `canonical sources unchanged ... YES` rather than
 `sources restored byte-for-byte: YES`. The lock is the same, but the harnesses are not identical
-elsewhere: the approval harness has no `must:` list — it requires an `expect:` regex to match the
-run's output — and the governance harness has an exit 3 when a canonical source changed while it ran.
+elsewhere: the approval harness has neither a `must:` list nor a required `expect:` — an `expect:`
+regex, when a mutant declares one, only chooses the stricter success message; a red run is counted as
+caught either way (`caught`, or `caught by a different assertion`) — so a mutant that turns the suite
+red for the wrong reason still counts, and the harness has no exit 3. The governance harness is
+stricter: every mutant names the test that must fail (exit 3 when a canonical source changed while it
+ran).
 
 **The captured child now runs inside the DSH Windows sandbox.** Each harness captures its child's
 output through temp files (`tooling/child-output.mjs`) instead of a pipe, because the sandbox denies a

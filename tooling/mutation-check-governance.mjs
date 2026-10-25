@@ -115,14 +115,13 @@ export const MUTANTS = [
     id: 'G01',
     what: 'HANDOFF proceeds with open features and no waiver at all',
     file: 'lib/tools.js',
-    // THE DEFECT NEEDS BOTH GUARDS REMOVED, AND NOT BECAUSE EITHER ALONE STILL REFUSES.
-    // Neutralising only `if (!waiverRequested)` leaves the empty-reason guard, which refuses a call
-    // that supplies no reason — but that guard reads the reason STRING, not the flag, so a caller
-    // that passes `waiver_reason` without `waive_open_features: true` slips past it. The
-    // single-guard mutant would then exercise that side channel rather than the rule this mutant is
-    // about ("no waiver at all"). Removing both makes the plain call — no flag, no reason — reach
-    // the transition. The product is safe because both guards are present AND `handoffWaived`
-    // (`:4041`) requires both arguments; the mutant removes both only to reach the defect.
+    // BOTH GUARDS, SO THE MUTANT REACHES THE DEFECT THIS CASE IS ABOUT. Neutralising only
+    // `if (!waiverRequested)` leaves the empty-reason guard; a call with no flag and no reason is
+    // then still refused — by the reason guard, whose message names that requirement instead of the
+    // open features — so the named test goes red for a different reason and proves nothing about the
+    // refusal itself. Removing both lets the plain call reach the transition. The product is safe:
+    // both guards are present AND `handoffWaived` (`:4041`) requires both arguments; the mutant
+    // removes both only to reach the defect.
     from: `        if (!waiverRequested) {`,
     to: `        if (false) {`,
     extra: {
