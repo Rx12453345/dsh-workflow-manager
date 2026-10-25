@@ -553,6 +553,34 @@ test('the report shouts CONTAMINATED and names where the snapshot was kept', asy
 // the fence's own contract
 // ---------------------------------------------------------------------------
 
+test('a restore from a tampered snapshot copy is refused, not written back', t => {
+  // The reviewer is TOLD the copy path and has write access to the temp root, so it can poison
+  // the very source a restore would read from. Writing those bytes back as "the original" would
+  // turn a detected incident into silent corruption.
+  const project = makeProject(t)
+  const snapshot = createReviewSnapshot(project)
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+
+  writeFileSync(join(snapshot.workDir, 'src', 'a.js'), 'export const a = "tampered"\n')
+  rmSync(join(project, 'src', 'a.js'))
+
+  const fence = verifyReviewSnapshot(snapshot)
+  assert.equal(fence.clean, false)
+  assert.ok(
+    fence.restoreErrors.some(entry => entry.includes('src/a.js')),
+    'the digest mismatch is reported',
+  )
+  assert.equal(fence.restored.includes('src/a.js'), false, 'nothing untrusted was written back')
+  assert.equal(existsSync(join(project, 'src', 'a.js')), false, 'the project is left as it was')
+})
+
 test('verifyReviewSnapshot reports a missing project as deletions to restore', t => {
   const project = makeProject(t)
   const before = signature(project)
