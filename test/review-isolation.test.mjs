@@ -44,7 +44,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
 
-import { DEFAULT_DIMENSIONS, runReview } from '../lib/review.js'
+import { DEFAULT_DIMENSIONS, renderIsolation, runReview } from '../lib/review.js'
 import {
   SNAPSHOT_CANARY_NAME,
   SNAPSHOT_MARKER_NAME,
@@ -513,6 +513,40 @@ test('the canary must survive, or the delete is reported as unsafe', t => {
   assert.equal(removed.ok, false)
   assert.match(removed.reason, /canary/)
   assert.equal(existsSync(join(project, 'src', 'a.js')), true, 'the project is untouched')
+})
+
+test('the report says the project was verified, and says it the honest way', async t => {
+  const project = makeProject(t)
+  const { service } = reviewerThat()
+  const outcome = await runReview({
+    feature: 'a change',
+    parent: { id: 'parent-1' },
+    subagents: service,
+    workspaceDir: project,
+    config: { bar: 8 },
+  })
+  const text = renderIsolation(outcome.isolation).join(' ')
+  assert.match(text, /disposable copy/)
+  assert.match(text, /verified after the review and is unchanged/)
+  assert.match(text, /content hashed/)
+})
+
+test('the report shouts CONTAMINATED and names where the snapshot was kept', async t => {
+  const project = makeProject(t)
+  const { service } = reviewerThat(() => {
+    writeFileSync(join(project, 'REVIEWER-NOTES.md'), 'scratch\n')
+  })
+  const outcome = await runReview({
+    feature: 'a change',
+    parent: { id: 'parent-1' },
+    subagents: service,
+    workspaceDir: project,
+    config: { bar: 8 },
+  })
+  const text = renderIsolation(outcome.isolation).join(' ')
+  assert.match(text, /CONTAMINATED/)
+  assert.match(text, /added 1/)
+  assert.match(text, new RegExp(outcome.isolation.cleanup.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
 })
 
 // ---------------------------------------------------------------------------
