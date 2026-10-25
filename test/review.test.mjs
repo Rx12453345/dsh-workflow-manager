@@ -500,6 +500,29 @@ test('the prompt survives an empty claim without throwing', () => {
   assert.match(prompt, /no description supplied/)
 })
 
+test('step 4 points at a file list only when a list was rendered', () => {
+  // THE DEFECT THIS PINS. The file-list section is rendered only when `changed_files` is
+  // non-empty, but step 4 used to say "compare it with the files the author listed above"
+  // unconditionally — a reviewer given only a diff was told to compare against a section that
+  // was not in the prompt. Reverting the conditional leaves the rest of the suite green, so
+  // without this test the wording is unpinned (a review located exactly that).
+  const withList = buildReviewPrompt({
+    feature: 'x',
+    changedFiles: ['lib/a.js', 'docs/B.md'],
+  })
+  assert.match(withList, /## Files the author says changed/)
+  assert.match(withList, /compare it with the files the author listed above/)
+  assert.match(withList, /assuming the author.s list is complete/)
+
+  const withoutList = buildReviewPrompt({ feature: 'x' })
+  assert.doesNotMatch(withoutList, /## Files the author says changed/)
+  assert.doesNotMatch(withoutList, /listed above/)
+  assert.doesNotMatch(withoutList, /the author.s list is complete/)
+  assert.match(withoutList, /no file list was supplied, so/)
+  assert.match(withoutList, /git is the only scope evidence/)
+  assert.match(withoutList, /assuming the change is complete/)
+})
+
 test('the advertised output schema is an object schema with the required fields', () => {
   assert.equal(REVIEW_OUTPUT_SCHEMA.type, 'object')
   assert.deepEqual(REVIEW_OUTPUT_SCHEMA.required, ['perDimension', 'issues'])

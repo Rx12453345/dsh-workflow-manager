@@ -984,6 +984,18 @@ test('the status tool refuses an unusable work_unit instead of blaming FEATURES.
       'the validator must speak once, not once per reader',
     )
 
+    // THE REFUSAL DOES NOT DEPEND ON THE PROJECT BEING OPTED IN. An unusable argument is wrong
+    // whatever the project is; the guard used to sit inside `project.detected === true`, so a
+    // non-opted project answered `ok: true` and silently ignored the label.
+    const bare = makeProject({ optIn: false })
+    try {
+      const ignored = await statusDef.execute({ work_unit: '../x' }, execFor(bare))
+      assert.equal(ignored.ok, false, 'a non-opted project must not swallow an invalid label')
+      assert.equal(ignored.status, 'bad-work-unit')
+    } finally {
+      rmSync(bare, { recursive: true, force: true })
+    }
+
     // The renderer must print the refusal rather than throw on a payload that has no report
     // sections (no plugin/hostServices/project) — the caller needs the sentence, not a crash.
     const text = renderStatus(result)

@@ -194,10 +194,11 @@ unflagged run is the honest NOT RUN — exit 2 is not a pass and must not be rea
   as a fresh sequence, round 1. The feature is recorded complete only from that verdict.
 - **Push and deploy are the human's.** `git push` is refused by the gate (a remote-https pipe is
   denied under `workspace-write`, and `danger-full-access` is disproportionate for publishing one
-  branch); deploying is `tooling/sync-to-profile.mjs` plus a DSH restart, run by a human. The user
-  pushed `e93175b` and deployed 0.3.0 on 2026-10-25; an agent in this workspace does not push or
-  deploy, and later deploys remain the human's step.
+  branch); deploying is `tooling/sync-to-profile.mjs` plus a DSH restart, run by a human. On
+  2026-10-25 the user pushed the branch and deployed 0.3.0; which tip is on the remote now, and what
+  is installed now, are read with `git status -sb` and `--check`, not restated here. An agent in this
+  workspace does not push or deploy, and later pushes and deploys remain the human's step.
 - **Scratch evidence is not durable.** `.tmp/` holds the recovery tooling (the decompressor, the
   operation indexer, the replay scripts, 57 decompressed logs) and is git-ignored. It explains how
-  every recovered file was produced, but it is not part of the repository and may be deleted — the
-  push is confirmed (`e93175b`).
+  every recovered file was produced, but it is not part of the repository and may be deleted: the
+  archive is the remote branch.

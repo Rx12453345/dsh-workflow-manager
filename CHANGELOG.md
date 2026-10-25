@@ -155,9 +155,8 @@ reparse-point delete guard → 1 red.
 
 These are user-visible changes on top of 0.2.0. They were written before a deployment and were synced
 later: the build at that point matched commit `3d6dd16`, which contains this code (measured 2026-10-25,
-modulo line endings). The checkout has since moved past that build, and the 0.3.0 build is now the
-installed one in both roots, so this code is live in the current copy; `3d6dd16` was its first
-deployment.
+modulo line endings). `3d6dd16` was this code's first deployment, and the later 0.3.0 sync replaced it;
+what is installed NOW is a question for `node tooling/sync-to-profile.mjs --check`, not for this entry.
 
 ### Added
 
@@ -197,11 +196,11 @@ deployment.
 
 ## Unreleased — P2.B1+ (code deployed at `3d6dd16`; docs and tests not)
 
-This batch was committed on `fix/p2b1-plus` and its **code** is in the installed `3d6dd16` build
-(measured 2026-10-25, modulo line endings). Its tests and documentation are **not** deployed: a
-`file:` dependency copies the package's listed files, and `docs/`, `test/` and the `run-*.mjs` scripts
-are not all in `files`. It was never exercised as a released build; do not read the deployed code as a
-0.3.0 release.
+This batch was committed on `fix/p2b1-plus` and its **code** was in the `3d6dd16` build as deployed
+then (measured 2026-10-25, modulo line endings). Its tests and documentation were **not** deployed at
+that point: a `file:` dependency copies the package's listed files, and `docs/`, `test/` and the
+`run-*.mjs` scripts are not all in `files`. It was never exercised as a released build; do not read
+the code installed from any build as a 0.3.0 release.
 
 ### Fixed
 - **Mutation harnesses now run inside the DSH Windows sandbox.** Each harness captured its child through a
@@ -324,8 +323,8 @@ was corrected by a docs-only follow-up after deployment; no code changed.
 ### Added
 
 > **Deployment status as of 2026-10-25.** The items below that say "Not deployed" were written at the
-> 0.2.0 release, before the P2.B1+ batch was synced. Their code is now in the installed `3d6dd16`
-> build; the renders and real-host checks some of them call unverified are still unverified (see
+> 0.2.0 release, before the P2.B1+ batch was synced. Their code was in the `3d6dd16` build as deployed
+> then; the renders and real-host checks some of them call unverified are still unverified (see
 > ROADMAP.md). The tags are kept as the state at the time they were written.
 
 - **Risk-graded verification depth** (`verification.policy`). A change can be declared

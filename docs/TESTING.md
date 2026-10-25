@@ -296,12 +296,16 @@ round:           1 (increment after a fix)
 - `observations` are records that do not affect the verdict.
 
 **The reviewer checks the working tree itself, and the framework reconciles the list too.** The prompt's
-step 4 tells the reviewer to run `git status --porcelain` in the project and compare it with the author's
-`changed_files`; any changed path missing from that list is an issue, scored against `scope`, `tests` or
-`correctness`. The framework also reads `git status` through an argv array (`lib/git-changes.js`) and
-adds a path the declaration omitted to the evidence, so the reviewer sees the omission without having to
-find it. Both are **evidence, not a security boundary**: `git status` only sees **uncommitted** changes,
-so a committed path is invisible and must still be declared. A real framework-side design would need a
+step 4 tells the reviewer to run `git status --porcelain` in the project. When a `changed_files` list
+was supplied, it says to compare the output with that list, and any changed path missing from it is an
+issue, scored against `scope`, `tests` or `correctness`; when **no** list was supplied (only a diff),
+the step says git is the only scope evidence and any changed path it reports is an issue, scored the
+same way — the phrase "listed above" is not emitted, because no list section is rendered. Both branches
+are pinned by `test/review.test.mjs`. The framework also reads `git status` through an argv array
+(`lib/git-changes.js`) and adds a path the declaration omitted to the evidence, so the reviewer sees
+the omission without having to find it. Both are **evidence, not a security boundary**: `git status`
+only sees **uncommitted** changes, so a committed path is invisible and must still be declared. A real
+framework-side design would need a
 base-commit diff, not `git status` (see
 [DESIGN.md §11.3](DESIGN.md#113-why-the-cross-check-is-evidence-not-a-security-boundary)).
 
