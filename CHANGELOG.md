@@ -10,6 +10,39 @@ live until it has been synced and DSH restarted.
 
 ---
 
+## [Unreleased] — 2026-10-25
+
+### Fixed — a review can no longer destroy the project it reviews
+
+On 2026-10-25 a `workflow_review` reviewer created a directory **junction** to the workspace under
+`%TEMP%` and ran a recursive delete; Node followed the link and emptied `D:\DSH_Work\WorkFlow`,
+taking the git history, the `.dsh` state and the uncommitted work with it. The review result itself
+labelled it "reviewer-side data loss, not a defect in the author's change" — the harness allowed it.
+
+What the measurements showed (Node v24.18.0, Windows): a review child inherits the **parent's**
+working directory and file policy — a `cwd` in the spawn request does not move its sandbox root, and a
+write into the real project still succeeds. A plugin cannot make a child it does not control
+read-only. `lstat` reports a junction as an ordinary directory, `realpathSync` leaves it unresolved,
+and only `realpathSync.native` and `readdir`'s `Dirent.isSymbolicLink()` see it.
+
+So the guard is the **transaction**, not a prompt. `workflow_review` now snapshots the project into an
+isolated temp root (a real copy, never a link; links are audited and escaping ones refused), points the
+reviewer at that copy, and re-scans the real project when the child finishes: deletions are restored
+byte-for-byte, modifications and additions are reported but not reverted (a concurrent human edit is not
+the reviewer's doing), and any difference makes the review **contaminated** — it cannot pass at any
+score, and its verdict is discarded. The copy is removed only if it is not a reparse point, contains no
+link, resolves inside the snapshot root, does not contain or equal the project, and its root still
+carries the marker this plugin wrote; the canary outside the copy must survive. A snapshot that cannot
+be built (unreadable tree, escaping link, size caps, failed copy) means **no reviewer starts**, and a
+snapshot is kept when it is the only remaining copy.
+
+New module `lib/review-sandbox.js`; 15 tests in `test/review-isolation.test.mjs`, including an incident
+replay that deletes the project through a junction and requires every byte back. Mutation check (manual,
+throwaway copy): removing the restore → 3 red; ignoring the contaminated fence → 4 red; removing the
+reparse-point delete guard → 1 red.
+
+---
+
 ## [0.2.0] — 2026-10-24
 
 The A1–A5 batch, plus the follow-up hardening found by independent review. The final release candidate

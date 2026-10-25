@@ -64,6 +64,22 @@ a dictionary that existed only inside the component factory — legal syntax, ru
 on that path. Fix: run the smoke test, which exercises the real render chain. **VERIFIED.** `USAGE.md §10`.
 `NEXT-STEPS.md:1197–1200`.
 
+### On Windows a junction is invisible to `lstat` and to `realpathSync`
+Measured on Node v24.18.0 after a reviewer emptied the workspace with a recursive delete through a
+directory junction. A junction created with `symlinkSync(target, path, 'junction')`:
+
+- `lstatSync(path).isSymbolicLink()` → **false** (it looks like an ordinary directory);
+- `readlinkSync(path)` → `EINVAL`;
+- `realpathSync(path)` → **the junction path itself**, so a containment check built on it silently
+  passes for a link that points at the project;
+- `realpathSync.native(path)` → the real target;
+- `readdirSync(parent, {withFileTypes:true})`'s `Dirent.isSymbolicLink()` → **true**;
+- `rmSync(path, {recursive:true})` removes only the link, but `rmSync(join(path,'child'), …)` deletes
+  **through** it into the target, and `unlinkSync(path)` fails with `EPERM` (use `rmdirSync`).
+A child subagent also inherits the parent's working directory and file policy: a `cwd` in the spawn
+request does not move its sandbox root, and a write into the real project still succeeds. **VERIFIED.**
+`lib/review-sandbox.js`, `test/review-isolation.test.mjs`.
+
 ---
 
 ## 2. The settings-slot contract
