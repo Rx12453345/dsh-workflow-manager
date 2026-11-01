@@ -207,11 +207,14 @@ not an enforced boundary — an honest model can still miss generated or renamed
 files) parsed and bound into the review fingerprint, with deleted and renamed paths handled explicitly;
 `git status` alone is the wrong primitive.
 
-### `showInPluginPage` has no reader
-Declared on the panel row's schema and annotated as such in `cordis.patch.yml`, but **nothing reads it**.
-**Why.** That round did not connect it to anything. It is marked honestly rather than silently removed.
-**What it would take.** Decide what it should gate (presumably the plugin-list entry) and wire it,
-or delete it.
+### `showInPluginPage` had no reader — **RESOLVED (2026-11-01, deleted)**
+It was declared on the panel row's schema, defaulted to `true`, and annotated as unread in
+`cordis.patch.yml` — a switch that could never do anything. The reason is structural: the plugin-list
+page is the HOST's, so a plugin-side boolean cannot hide it; wiring it would mean asking the host for a
+capability that does not exist. It was therefore **deleted** rather than wired — from
+`cordis.patch.yml`, `lib/config-schema.js`, `DEFAULT_CONFIG`, the panel module's doc comment and the
+regression that pinned the row's scalars. A field nothing reads is the same defect as
+`modules.handoffDoc` before 0.3.0: a knob that lies.
 
 ### The remaining nested configuration sections on the settings page
 Still reachable only through `workflow_set`: `context.*`, `acceptance.*`, `guards.*`, `escalation.*`,

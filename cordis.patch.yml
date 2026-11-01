@@ -200,9 +200,9 @@
       #
       # WHAT THIS ROW IS NOW, corrected. Its Host half (`lib/components/panel/index.js`)
       # registers nothing — it only reports whether the settings service is up. Its real
-      # job is to own the PANEL namespace: `showInSidebar` / `sidebarLabel` /
-      # `showInPluginPage` are declared on this row's schema, and the browser half in
-      # `lib/client.js` reads them back with `ctx.configForms.get('dsh-workflow-panel')`.
+      # job is to own the PANEL namespace: `showInSidebar` / `sidebarLabel` are declared on
+      # this row's schema, and the browser half in `lib/client.js` reads them back with
+      # `ctx.configForms.get('dsh-workflow-panel')`.
       # The sidebar entry and its `main` body are registered from THAT bundle — the
       # package's one browser half — not from a second bundle: `dsh-client-modules`
       # attaches a browser half to the Loader row whose specifier is the BARE package
@@ -216,5 +216,3 @@
         # The sidebar entry's visible text, accessible name and collapsed tooltip. Blank
         # falls back to the `panelLabel` dictionary entry, then to the panel id.
         sidebarLabel: 工作流设置
-        # NOT READ YET — nothing consumes this switch, and it is not wired to anything.
-        showInPluginPage: true

@@ -1567,7 +1567,6 @@ test('the panel row\'s patch values match the runtime defaults', () => {
 
   assert.equal(scalar('showInSidebar', panelRow), String(DEFAULT_CONFIG.showInSidebar))
   assert.equal(scalar('sidebarLabel', panelRow), DEFAULT_CONFIG.sidebarLabel)
-  assert.equal(scalar('showInPluginPage', panelRow), String(DEFAULT_CONFIG.showInPluginPage))
 })
 
 test('the browser half still requires nothing but react', () => {
