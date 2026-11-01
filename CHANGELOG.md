@@ -70,6 +70,14 @@ working directories with their own reason instead of being counted as destinatio
 exfiltration precedence, the unknown-tool default (`null` = defer) and the self-deployment exemption are
 unchanged, and three mutants were added to `tooling/mutation-check-approval.mjs` for the new rules.
 
+### Fixed — `workflow_gc action=list` could not read back what it recorded
+
+Found while using the tool on this project (the dogfood feature): the list branch returns the entries
+under `ledger.constraints`, but the report read a top-level `constraints` key that no branch produced, so
+`action=list` answered with the ledger path alone. A rule written through the confirmed `action=add` path
+could only be read with `cat .dsh/CONSTRAINTS.json`. The list now prints every entry (id, status, rule)
+with its `retire_when`, and a mutant in `tooling/mutation-check.mjs` pins it.
+
 ---
 
 ## [Unreleased] — 2026-10-25
