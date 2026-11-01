@@ -1928,6 +1928,21 @@ test('the advance surface judges staleness with the project classification, like
       status.reviewFreshness.staleKinds,
       'the two surfaces must not disagree about the same stale record',
     )
+
+    // AND THE SECOND CALL SITE TOO: the COMMIT/HANDOFF gate builds its own freshness view, and a
+    // refusal that labels the record "code changed" while status says "documents only" is the same
+    // contradiction one move later. Independent review of the follow-up found this line had no
+    // covering test: reverting it left the whole suite green.
+    const state = readState(dir).state
+    writeState(dir, { ...state, phase: 'EVALUATE', feature_id: 'F001', bootstrapped: true })
+    const commit = await buildAdvanceToolDefinition(options).execute({ action: 'advance', to: 'COMMIT' }, execFor(dir))
+    assert.equal(commit.ok, false, 'a stale record must still refuse the move')
+    assert.equal(commit.status, 'stale-review')
+    assert.deepEqual(
+      commit.reviewFreshness.staleKinds,
+      status.reviewFreshness.staleKinds,
+      'the COMMIT refusal must judge the record the same way status does',
+    )
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

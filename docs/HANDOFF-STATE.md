@@ -44,9 +44,10 @@ All eight features are complete with an independent review behind each: the P0 r
 fence, the P1 shape-classified approval gate, the four P3 items (EOL-aware fingerprint, governance
 mutant, code minors, handoff dogfood, documentation caveats), the UI harness, and the recovery
 baseline. **This session's change (0.4.0) has independent reviews of its own** — round 1 FAIL 6.86
-(located nine defects, all fixed), round 2 PASS 8.43, then a small follow-up that fixed the five
-findings round 2 recorded — and the phase machine is terminal, so those verdicts are not recorded
-against a feature.
+(located nine defects, all fixed), round 2 PASS 8.43 (five minor findings, all fixed), follow-up PASS
+8.86 (a broken command in this document, and the one call site that had no covering test — both
+fixed; the shipped code was byte-identical to what that review read) — and the phase machine is
+terminal, so those verdicts are not recorded against a feature.
 
 ## Stale review records, and why
 
@@ -87,9 +88,10 @@ Recorded by the PASSing reviews; none blocks delivery, and each is a real (small
 
 ## Open decisions
 
-1. **Deliver 0.4.0.** The branch is ahead of the pushed tip (read `git log origin/…..HEAD --oneline`
-   for the number — it moves) and `master` has never been merged. Decide: push, merge `--ff-only`,
-   sync to the profile, restart — or leave the deployment at the previous build.
+1. **Deliver 0.4.0.** The branch is ahead of the pushed tip — `git rev-list --count
+   origin/recovery/p2b1-content..HEAD` prints the number, which moves — and `master` has never been
+   merged. Decide: push, merge `--ff-only`, sync to the profile, restart — or leave the deployment
+   at the previous build.
 2. **The stale records.** Re-review the `code changed` and `unclassified` ones with their narrow
    sets, or accept them and let the judgement keep saying so. The `documents only` ones can wait
    indefinitely (the gate still refuses them; nothing is waiting on that refusal).

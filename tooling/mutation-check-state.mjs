@@ -80,6 +80,14 @@ const MUTANTS = [
     replace: 'export const MAX_PERSISTED_ISSUES = 99\n',
     expect: /10|issuesTotal|bounded/,
   },
+  {
+    id: 'S6',
+    what: 'the COMMIT/HANDOFF gate judges staleness WITHOUT the project classification, so its refusal disagrees with status',
+    file: 'lib/tools.js',
+    find: '        const all = reviewFreshnessAll(projectDir, workUnit, features, briefContext)\n',
+    replace: '        const all = reviewFreshnessAll(projectDir, workUnit, features)\n',
+    expect: /COMMIT refusal must judge|disagree/,
+  },
 ]
 
 function run() {
