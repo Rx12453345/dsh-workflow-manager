@@ -148,20 +148,20 @@ it cannot check it.
 
 ### The panel settings page — the B5.4 checklist
 B5.1–B5.3 were synced (`copied lib/approval.js / lib/client.js / lib/index.js / lib/tools.js` →
-`sync complete: 4 copied, 19 already identical`), and `TESTING.md` records the rendered page as verified
-from a user screenshot. What is still only source-level for the **new** controls is the nine-item B5.4
-walkthrough, in particular the **lost-update** re-test — change approval strength and then risk
-threshold within one round-trip, refresh, and confirm both are the new values (NEXT-STEPS.md:2117–2143).
+`sync complete: 4 copied, 19 already identical`), and `CHANGELOG.md` (`## 2026-10-12`, the paragraph
+that records the deployment) records the rendered page as verified from a user screenshot. What is
+still only source-level for the **new** controls is the nine-item B5.4 walkthrough, in particular the
+**lost-update** re-test — change approval strength and then risk threshold within one round-trip,
+refresh, and confirm both are the new values (NEXT-STEPS.md:2117–2143).
 
 ### Structured-output enforcement
 `workflow_review` passes an `outputSchema` through the service API, so the reviewer is forced to return
 JSON matching a schema. The offline tests cover the fallback path only (structured missing → parse the
-text → `parsed: false` on failure). The sources do not agree on the real-host status: `TESTING.md` §6
-records `outputSchema` as verified by a real-host end-to-end run, while an earlier journal entry
-(NEXT-STEPS.md:1310–1312) says that step was still outstanding. **Treat the parse/normalise tests as the
-certain evidence.** Related, verified limitation: the model-facing `subagent` tool does **not** accept
-`outputSchema` at all, which is one concrete reason `workflow_review` exists rather than a prompt
-asking reviewers nicely for JSON.
+text → `parsed: false` on failure). **No real-host record exists for it**: an earlier journal entry
+(NEXT-STEPS.md:1310–1312) says that step was still outstanding, and no section of `TESTING.md` claims a
+real-host `outputSchema` run. **Treat the parse/normalise tests as the certain evidence.** Related,
+verified limitation: the model-facing `subagent` tool does **not** accept `outputSchema` at all, which
+is one concrete reason `workflow_review` exists rather than a prompt asking reviewers nicely for JSON.
 
 ### Other unverified items
 - `human_check: 'yes'` (a string) would be rejected as unasserted, which is the fail-closed direction,
