@@ -1,7 +1,7 @@
 # Roadmap and known gaps
 
-What is proven, what is implemented but never exercised on a real host, what deliberately refuses
-rather than pretends, and what is known to be broken.
+What is proven, what is implemented and not yet fully exercised on a real host, what deliberately
+refuses rather than pretends, and what is known to be broken.
 
 This file exists because the project has a documented history of documents claiming things that were
 not true. Nothing here is inferred to work. Where two sources disagree, both are named.
@@ -49,40 +49,37 @@ against `git status` — RESOLVED (2026-10-25)" below.
 
 ## Unverified
 
-Implemented, and never exercised on a real host. Listed because "unverified is not broken, but
-unverified means you do not know".
+Items implemented and, at the time of writing, not exercised on a real host. Listed because
+"unverified is not broken, but unverified means you do not know". The subsection on the three UI
+surfaces below now carries a dated partial verification; the rest has not been exercised.
 
 **Verified on a real host on 2026-11-01 — the coarse walk-through only.** After deploying 0.4.0 and
 restarting, a human walked five checks and reported all of them correct: the settings page rendered
 both plugin rows; `verification.policy` showed the value the project file sets (not the patch-row
-default); the sidebar entry appeared and opened its body; switching `showInSidebar` off withdrew the
-entry **and** the panel row's own page switched it back on; and the conversation tab rendered per
-project, including the "not opted in" message for a project without `.dsh/workflow.yml`. The
-`showInPluginPage` removal was confirmed on the same pass: the panel row no longer offers it and the
-tab's config table no longer lists it. The three UI mutation harnesses also ran in a normal terminal:
-`client` **14/14**, `panel` **28/28**, `project-tab` **58/58** caught, with `missed 0`, `not run 0`,
-`apply-failed 0`, `partial 0` and sources restored byte-for-byte (exit 0) — the counts they had never
-produced, because the sandbox cannot start the browser.
+default); the sidebar entry appeared in the panel list, opened its body, read fine in the narrow rail
+and showed a sane icon; switching `showInSidebar` off withdrew the entry **and** the panel row's own
+page switched it back on; and the conversation tab rendered per project, including the "not opted in"
+message for a project without `.dsh/workflow.yml`. The `showInPluginPage` removal was confirmed on the
+same pass: the panel row no longer offers it and the tab's config table no longer lists it. The three
+UI mutation harnesses also ran in a normal terminal: `client` **14/14**, `panel` **28/28**,
+`project-tab` **58/58** caught, with `missed 0`, `not run 0`, `apply-failed 0`, `partial 0` and
+sources restored byte-for-byte (exit 0) — the counts they had never produced, because the sandbox
+cannot start the browser.
 **What that does NOT cover.** The granular checklists below — the 11-item layout walk (divider widths,
-760 px cap, badge wrapping, the two-column settings page), the 9-item tab walk (`approval: nope`'s
-fail-closed display, `evaluator.bar: abc`'s warning, the subscription refresh without a reload), icon
-aesthetics, the `whileServed` ordering, cross-talk between the two `configForms` pages, and the absence
-of `[dsh-workflow]` console errors — were not individually walked, so each entry below keeps its
-original status. "The sidebar renders and switching works" is now known; "the layout reads well at
-every width" is still not.
+760 px cap, badge wrapping, the two-column settings page, the warning banner, console errors), the
+9-item tab walk (`approval: nope`'s fail-closed display, `evaluator.bar: abc`'s warning, the
+subscription refresh without a reload, the layer badges), the `whileServed` ordering, cross-talk
+between the two `configForms` pages, and live withdrawal at runtime — were not individually walked.
+"The surfaces exist, read correctly and the switches work" is now known; "every layout item on the
+checklists is right" is still not.
 
 ### The sidebar panel rendering (B6)
 The entry on `sidebar.panellist` and the body on the root-scoped `main` slot are registered from the
-existing `lib/client.js`, gated by `showInSidebar`. **Nothing about the rendered result has been seen:
-DSH was never started during that round.** Offline evidence only: 419/419 tests, 22/22 mutants,
-`simulate-client-scan.mjs` STEP 1–5.
-Unverified specifically:
-- whether the entry actually appears in the sidebar's global-panels group;
-- whether clicking it projects the `main` body (a missing `main` entry **throws**);
-- whether the single-column layout is readable in a narrow rail;
-- whether the icon looks right;
-- the **recovery path**: after switching `showInSidebar` off, whether the panel row's own
-  `plugins.row.config` page really appears in Settings → Plugins and really switches it back on;
+existing `lib/client.js`, gated by `showInSidebar`. It was **seen on a real host on 2026-11-01** (see
+the verification paragraph at the top of this section): the entry appears in the sidebar's
+global-panels group, clicking it projects the `main` body, it reads fine in the narrow rail, the icon
+is sane, and the recovery path works — switching `showInSidebar` off withdraws the entry and the panel
+row's own page in Settings → Plugins switches it back on. Still never looked at:
 - that the two `plugins.row.config` registrations (core row, panel row) do not cross-talk — the core
   row's page must **not** show the sidebar switch;
 - `whileServed` timing: it depends on the settings mirror serving `dsh-workflow-panel` first. If that
@@ -91,13 +88,17 @@ Unverified specifically:
 - `panelVisible` behaviour when the switch is turned off at runtime: it is decided **once, at
   registration**; changing it live requires a page refresh. Live withdrawal was deliberately not
   implemented, because it would make the panel vanish under a user who is mid-edit.
-**What it would take.** Start DSH, sync first, hard-reload, and walk B6.4's checklist (NEXT-STEPS.md:2257–2300).
+**What it would take.** The hosting, reading and recovery halves are verified; the three items above
+need a real disable of the panel row and a runtime toggle, i.e. B6.4's remaining items
+(NEXT-STEPS.md:2257–2300).
 
 ### The sidebar layout fix (D) — 11-item manual checklist
 The two-column defect is fixed and its geometry is measured in a real engine (headless Chromium:
 `0px 244px` before, `264px` after). The deployment history is in CHANGELOG.md, and what is installed
 right now is a `node tooling/sync-to-profile.mjs --check` question this page deliberately does not
-answer. What has no recorded result is the visual walk-through itself:
+answer. The page **was** opened once on a real host on 2026-11-01 (the sidebar walk-through above saw
+it render single-column), but the 11 items were not checked one by one — what has no recorded result is
+that itemised walk:
 The checklist is NEXT-STEPS.md:2808–2820: label no longer wraps per character; single column; full-width
 row dividers; left-aligned and ≤520 px; looser row gap; the settings page **still** two-column with a
 200 px label column (the control group); the `llm-only` warning banner full width; the tab shows the
@@ -108,27 +109,36 @@ Whether the dividers and 16 px spacing look *good* is an aesthetic judgement no 
 ### The project tab manual checklist — 9 items
 The "actual effective configuration" view renders by answer-first-then-raw-text, with a per-row layer
 badge. Its logic is covered by differential tests (the host's own functions vs the browser mirror) and
-P1–P57 mutants all caught. The rendering is not.
+P1–P57 mutants all caught. **The rendering was seen once, on 2026-11-01** (the verification paragraph
+at the top of this section): the tab appears per conversation, renders the effective configuration for
+this project, and shows "not opted in" (never an empty table) for a project without
+`.dsh/workflow.yml`. The other eight items were not individually walked:
 Checklist (NEXT-STEPS.md:3164–3179): first screen is the effective config, not the file text; in this
 project `tier: standard` shows **本工程覆盖** and `approval.riskThreshold: medium` shows
 **继承自默认值**; the overview counts equal the table's row counts; "re-read" follows the file; changing
 an inherited default in Settings → Plugins updates the tab **without a refresh** (the subscription);
-a project with no `.dsh/workflow.yml` shows "not opted in" and **must never show a defaults table**;
 `approval: nope` shows the fail-closed four values plus `文件要求：nope` and the reason; `evaluator.bar:
 abc` warns while still displaying `abc`; visual checks (760 px cap, no overlap, badges wrap without
 squeezing the value, the seven dimensions wrap readably); and **no writable control exists** on the page
 other than "re-read".
-**What it would take.** Sync, restart, walk the checklist by hand.
+**What it would take.** Sync, restart, walk the checklist above item by item; only the "does the tab
+exist and show this project / not-opted-in" question has been answered.
 
-### The `verification.policy` real-host path
-Implemented and self-tested (V01–V27), and **never exercised on a real host**: this project had not
-opted in at the time, and there was no GUI. Covered only by six cases in `test/review.test.mjs` that go
-through the **real `execute`** with fake `subagents` / fake `userQuestions`. What remains unproven is
-the run on a real host, not the presence of the code: which build carried this code, and when, is in
-CHANGELOG.md, and what is installed right now is again a `--check` question this page does not answer.
-**What it would take.** Deploy, then call `workflow_review` with a `class` and `changed_files` on a real
-host and read the report and the refusal text. Also unverified: the human-check attestation path
-(`caller-attestation`) can only ever be an attestation.
+### The `verification.policy` real-host path — **exercised 2026-11-01 (advisory only)**
+Implemented and self-tested (V01–V27); until 2026-11-01 it had only been run through `test/review.test.mjs`
+with fake `subagents`. That day it ran on a real host: four `workflow_review` calls carried
+`class` + `changed_files`, and the depth report answered with what it is supposed to answer — the 0.4.0
+round-1 call declared `logic` over `lib/` + `package.json`, the resolver derived `security` at depth 3
+from the files, printed `DECLARATION CONTRADICTED (policy advisory: reported, not blocking; enforced
+would refuse)`, named the five required harnesses, and said
+`independent review is REQUIRED at this depth and cannot be confirmed away`. The `human_check`
+attestation path was exercised too: round 2 of the UI change recorded `attested yes, confirmed by
+caller-attestation`. The settings page also displayed the project's real `verification.policy` value
+(seen in the UI walk-through above).
+**Still unproven.** The **enforced** half: a policy of `enforced` (or `off`) never ran here, so neither
+the user-confirmation question for an override nor the refusal-on-shallower-class path has been seen on
+a host. The attestation also remains an attestation by construction — the framework records the claim,
+it cannot check it.
 
 ### The panel settings page — the B5.4 checklist
 B5.1–B5.3 were synced (`copied lib/approval.js / lib/client.js / lib/index.js / lib/tools.js` →
@@ -355,13 +365,15 @@ mutant "caught".
 Only a real failing assertion can catch a mutant. The classification is unit-tested without a browser
 in `test/mutation-verdict.test.mjs`.
 
-**What still needs a human.** The end-to-end proof that a real browser run still catches the mutants
-cannot be produced in the sandbox. The three harnesses are **NOT RUN in-sandbox after this change**
-and must be run in a normal terminal with a Chromium-family browser; their caught/missed counts are
-unmeasured until then. The other harnesses run in-sandbox through the file-backed child capture —
-including `mutation-check-isolation.mjs` (added 2026-11-01 for the review fence) and
-`mutation-check-state.mjs` (added 2026-11-01 for the recorded state: findings, per-file digests and
-the judged staleness).
+**What still needs a human.** The end-to-end proof needs a real browser, and the sandbox cannot start
+one: an in-sandbox run is **NOT RUN** (exit 2, never a pass). That proof was produced once, on
+**2026-11-01**, in a normal terminal with a Chromium-family browser: client **14/14**, panel **28/28**,
+project-tab **58/58** caught, with `missed 0`, `not run 0`, `apply-failed 0`, `partial 0` and sources
+restored byte-for-byte (exit 0). Those counts are measured, not pending; they are also a dated result,
+not a standing guarantee, so every future run still needs that terminal. The other harnesses run
+in-sandbox through the file-backed child capture — including `mutation-check-isolation.mjs` (added
+2026-11-01 for the review fence) and `mutation-check-state.mjs` (added 2026-11-01 for the recorded
+state: findings, per-file digests and the judged staleness).
 
 ### Reviewer step 4 used to compare with a list that could be absent — **FIXED**
 When `workflow_review` was called with no `changed_files`, `buildReviewPrompt` omitted the "Files the
@@ -387,8 +399,8 @@ by the host regardless of the defaults), plus one differential case and one muta
 today, because `lib/config-schema.js` defaults all four approval fields.
 
 ### `run-config-check.mjs` only walks the core row's patch block
-The panel row's three patch values were not checked by the existing tool. A `test/status.test.mjs`
-comparison against `DEFAULT_CONFIG` substitutes as a guard.
+The panel row's two patch values (`showInSidebar`, `sidebarLabel`) were not checked by the existing
+tool. A `test/status.test.mjs` comparison against `DEFAULT_CONFIG` substitutes as a guard.
 **What it would take.** Teaching `run-config-check.mjs` about all three rows; the tool was out of scope
 in the round that added the panel.
 
