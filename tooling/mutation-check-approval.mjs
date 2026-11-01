@@ -773,8 +773,8 @@ const MUTANTS = [
     id: 'M68',
     what: 'a destination is only recognised by its key name, so an absolute path under an unknown key defers',
     file: 'lib/approval.js',
-    find: `      if (DESTINATION_KEYS.has(lowered) || ABSOLUTE_PATH_SHAPE.test(value)) {`,
-    replace: `      if (DESTINATION_KEYS.has(lowered)) {`,
+    find: `      if (ABSOLUTE_PATH_SHAPE.test(value)) {`,
+    replace: `      if (false) {`,
     suite: 'unit',
     expect: /outside the project|SHAPE/i,
   },
@@ -786,6 +786,15 @@ const MUTANTS = [
     replace: `      if (false) {`,
     suite: 'unit',
     expect: /working directory outside the project/,
+  },
+  {
+    id: 'M70',
+    what: 'the absolute-path shape rule reads TEXT keys as destinations again, so a slash-prefixed pattern/prompt/content escalates',
+    file: 'lib/approval.js',
+    find: `      if (TEXT_KEYS.has(lowered)) return`,
+    replace: `      if (false) return`,
+    suite: 'unit',
+    expect: /names a location outside|slash-prefixed/,
   },
 ]
 

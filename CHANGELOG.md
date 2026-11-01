@@ -48,7 +48,7 @@ Two related guards, from the same review:
   instead. Ancestors are checked (native realpath, contained in the project, not a reparse point), and a
   project root that has been swapped for a junction is reported as `rootSwapped` with nothing restored.
 
-Ten cases were added to `test/review-isolation.test.mjs`; the test helper that counts links was itself
+Seven cases were added to `test/review-isolation.test.mjs`; the test helper that counts links was itself
 weaker than the guard (it used `lstat`, which reports a Windows junction as a directory) and now uses
 the parent `Dirent` plus the native realpath.
 
@@ -62,7 +62,10 @@ the same hole a level down: they were recognised only by an enumerated key, so
 
 Classification is now by **shape**: a tool whose name looks like a shell, or a call that carries a
 program body under a command key, is `medium` (the name list is kept as a fast path); a string value
-that is an absolute path is a destination whatever its key is called; and `cwd`/`workdir` are judged as
+that is an absolute path is a destination whatever its key is called — except under a key that names
+TEXT, because `ops_grep{pattern: "/etc/passwd"}`, `edit{old_string: "/api/v1"}` and
+`subagent{prompt: "/plan this"}` are not destinations and the false reason was itself a denial at the
+default strength; and `cwd`/`workdir` are judged as
 working directories with their own reason instead of being counted as destinations. Exemptions,
 exfiltration precedence, the unknown-tool default (`null` = defer) and the self-deployment exemption are
 unchanged, and three mutants were added to `tooling/mutation-check-approval.mjs` for the new rules.

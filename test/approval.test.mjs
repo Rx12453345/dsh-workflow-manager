@@ -344,8 +344,18 @@ test('a shell and a destination are recognised by SHAPE, not by a name list', ()
       [{ name: 'ops_bash', arguments: { command: 'echo hi', workdir: dir } }, 'medium', 'a shell inside the project'],
       // destinations by shape (new) and by key (unchanged)
       [{ name: 'sync_tool', arguments: { destination_file: 'C:/Windows/x.dll' } }, 'medium', 'an absolute path under an unknown key'],
+      [{ name: 'ops_write', arguments: { script_path: 'C:/Windows/x.sh' } }, 'medium', 'an absolute path under a key the plugin never enumerated'],
       [{ name: 'window_tool', arguments: { target: '\\\\server\\share\\x' } }, 'medium', 'a UNC destination'],
+      [{ name: 'write', arguments: { path: '/etc/hosts' } }, 'medium', 'a key-named destination is still judged'],
       [{ name: 'copy_tool', arguments: { source: join(dir, 'lib', 'a.js') } }, 'low', 'a keyed path inside the project'],
+      // ...but TEXT is not a place. A slash-prefixed regex, diff line or prompt is not a
+      // destination; escalating it was a false reason (and at the default strength an
+      // unanswered ask is a denial). Found by the 2026-11-01 review, reachable in practice.
+      [{ name: 'ops_grep', arguments: { pattern: '/etc/passwd' } }, null, 'a slash-prefixed search pattern'],
+      [{ name: 'edit', arguments: { old_string: '/api/v1' } }, null, 'a path-like diff line'],
+      [{ name: 'write', arguments: { content: '/usr/local' } }, null, 'path-like file CONTENT'],
+      [{ name: 'subagent', arguments: { prompt: '/plan this' } }, null, 'a prompt that starts with a slash'],
+      [{ name: 'web_search', arguments: { query: '/usr/share/doc' } }, null, 'a slash-prefixed query'],
       // working directories are judged as working directories (new), not as destinations
       [{ name: 'ops_write', arguments: { workdir: 'C:/Windows' } }, 'medium', 'a working directory outside the project'],
       [{ name: 'ops_write', arguments: { workdir: dir } }, 'low', 'a working directory inside the project'],
