@@ -314,15 +314,25 @@ Measured 2026-10-25: baseline green (0 fail, 7 environment-gated skips), `G01–
 canonical sources unchanged. The verdict logic itself is pinned by `test/governance-mutation.test.mjs`
 (a red baseline, a crash with no passing test and a red-for-the-wrong-test run are all NOT a catch).
 
-### The UI mutation harnesses still need a normal terminal
+### The UI mutation harnesses are NOT RUN in-sandbox — the false-catch is FIXED
 The three harnesses that exercise a rendered surface — `mutation-check-client.mjs`,
-`mutation-check-panel.mjs`, `mutation-check-project-tab.mjs` — launch Chromium for the layout test. The DSH
-sandbox cannot launch it, so they cannot produce a harness result there; the other six now run in-sandbox
-through the file-backed child capture — the sixth is `mutation-check-isolation.mjs`, added 2026-11-01
-for the review fence.
-**Why it is unfixed.** It is the browser launch, not the capture.
-**What it would take.** Run them in a normal terminal (the documented path), or find a headless engine the
-sandbox permits.
+`mutation-check-panel.mjs`, `mutation-check-project-tab.mjs` — launch Chromium for the layout test.
+The DSH sandbox cannot launch it, so the suite is red there for an **environment** reason. The old
+judge (`caught: failed.length > 0`) counted that red as a caught mutant, so a red baseline made every
+mutant "caught".
+
+**Fixed (P3-3).** The three harnesses now run the unmutated baseline first and share
+`tooling/mutation-verdict.mjs`, which separates REAL failures from ENVIRONMENT failures. A baseline
+(and any mutant run) with no verdict is **NOT RUN**, printed with the browser reason and exiting
+**2** (not a pass); a surviving mutant is exit 1, APPLY-FAILED is 4 and an integrity failure is 3.
+Only a real failing assertion can catch a mutant. The classification is unit-tested without a browser
+in `test/mutation-verdict.test.mjs`.
+
+**What still needs a human.** The end-to-end proof that a real browser run still catches the mutants
+cannot be produced in the sandbox. The three harnesses are **NOT RUN in-sandbox after this change**
+and must be run in a normal terminal with a Chromium-family browser; their caught/missed counts are
+unmeasured until then. The other six harnesses run in-sandbox through the file-backed child capture —
+the sixth is `mutation-check-isolation.mjs`, added 2026-11-01 for the review fence.
 
 ### Reviewer step 4 used to compare with a list that could be absent — **FIXED**
 When `workflow_review` was called with no `changed_files`, `buildReviewPrompt` omitted the "Files the

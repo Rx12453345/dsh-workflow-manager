@@ -234,15 +234,27 @@ transport of its stdout/stderr changed. **Verified by the three sandbox runs tha
 start a captured child — `mutation-check-approval.mjs`, `mutation-check-verification.mjs` and
 `mutation-check-work-unit.mjs`** — each reached its mutants and printed its restore line.
 
-**The three UI harnesses cannot be judged in the sandbox.** `mutation-check-client.mjs`,
+**The three UI harnesses are NOT RUN in-sandbox.** `mutation-check-client.mjs`,
 `mutation-check-panel.mjs` and `mutation-check-project-tab.mjs` run `test/status.test.mjs`, which
-includes the Chromium layout measurement. The suite runner skips that case in-sandbox (Layer 1.1),
-but these harnesses spawn the test file directly and **do not set `DSH_WORKFLOW_SANDBOX`** — so an
-in-sandbox run reaches the browser launch, which the sandbox cannot complete. That is an
-**environment failure, not a caught mutant**, and the harness does not yet classify it as NOT RUN
-(the still-open UI-harness gap). **Run those three in a normal terminal**, and read an in-sandbox run
-of them as no evidence about the rendered layout. The gap is tracked in
-[ROADMAP.md](ROADMAP.md) §"The UI mutation harnesses still need a normal terminal".
+includes the Chromium layout measurement. They spawn the test file directly (not through
+`run-unit-tests.mjs`) and do not set `DSH_WORKFLOW_SANDBOX`, so an in-sandbox run reaches the
+browser launch, which the sandbox cannot complete.
+
+**A red baseline is not evidence (P3-3).** The three harnesses run the unmutated baseline FIRST and
+classify it through `tooling/mutation-verdict.mjs`. A baseline that cannot produce a verdict — red
+only because the browser exited early (`the browser exited early with 2147483651`), or green only
+because the layout case was skipped for an environmental reason — is **NOT RUN**, prints one line
+naming the browser, and exits **2**. **Exit 2 is not a pass.** A surviving mutant is exit 1,
+APPLY-FAILED is 4 and a source-integrity failure is 3, so a missing verdict can never be confused
+with a surviving mutant. Only a REAL failing assertion (with a passing test next to it) increments
+the caught count; the browser failure is reported separately and excluded.
+
+**The end-to-end proof still needs a normal terminal.** The classifier is pinned without a browser
+by `test/mutation-verdict.test.mjs`, but whether a real browser run still catches the mutants can
+only be measured in a normal terminal with a Chromium-family browser. The three harnesses are NOT
+RUN in the sandbox after this change and must be run in a normal terminal; read an in-sandbox run as
+no evidence about the rendered layout. The remaining work is tracked in
+[ROADMAP.md](ROADMAP.md) §"The UI mutation harnesses are NOT RUN in-sandbox — the false-catch is FIXED".
 
 > ⚠️ **Never run two of these concurrently.** They rewrite files under `lib/`. Two at once on
 > `lib/client.js` once left **two mutants permanently in the source tree while both processes printed

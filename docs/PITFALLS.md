@@ -417,8 +417,10 @@ handling, printed wording and byte-for-byte restoration are unchanged — only t
 **VERIFIED** by running `mutation-check-approval.mjs`, `mutation-check-verification.mjs` and
 `mutation-check-work-unit.mjs` inside the sandbox: all three reached their mutants and printed the restore
 line, where before they could not start the child. `test/child-output.test.mjs` covers split streams, exit
-status, spawn failure and large output. The UI harnesses still cannot run there — they launch Chromium for
-the layout test — so `mutation-check-client/-panel/-project-tab` need a normal terminal.
+status, spawn failure and large output. The UI harnesses are **NOT RUN in-sandbox** — they launch
+Chromium for the layout test, and now say so with exit 2 (naming the browser) instead of counting that
+red as a caught mutant — so `mutation-check-client/-panel/-project-tab` still need a normal terminal for
+the end-to-end mutant counts.
 
 ### Restoration verification is weaker than it looks
 `mutation-check-approval.mjs` judged restoration **indirectly** (unit + smoke go green after rollback) and

@@ -370,8 +370,10 @@ piped child (`EPERM`) and cannot start a Chromium-family browser. So:
   run `test/status.test.mjs`, whose layout case launches Chromium to measure the grid. The suite
   runner skips that case in-sandbox, but these harnesses spawn the file directly and do not set
   `DSH_WORKFLOW_SANDBOX`, so an in-sandbox run reaches the browser launch, which the sandbox cannot
-  complete. That is an **environment failure, not a caught mutant**; run the three in a normal
-  terminal. Classifying that failure as NOT RUN instead of "red" is the still-open UI-harness gap.
+  complete. That is an **environment failure, not a caught mutant**: the three harnesses classify a
+  baseline with no verdict as **NOT RUN** (exit 2, naming the browser) through
+  `tooling/mutation-verdict.mjs`, and only a real failing assertion can catch a mutant. They are
+  **NOT RUN in-sandbox** and must be run in a normal terminal for the end-to-end mutant counts.
 - `tooling/mutation-check-lock-probe.mjs` prints `NOT RUN` and exits **2** in the sandbox unless
   `DSH_WORKFLOW_SANDBOX=1` is set, because its unmutated baseline cannot be green when the lock
   tests' piped children are denied. **Exit 2 is not a pass.**

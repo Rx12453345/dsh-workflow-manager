@@ -2,7 +2,19 @@
  * B5.2 mutation harness (temporary, lives OUTSIDE the plugin package).
  *
  * For each mutant: apply a literal edit to lib/client.js, run the panel's own test file,
- * record whether it went RED, then restore the file byte-for-byte and verify the hash.
+ * record whether the NAMED test went RED, then restore the file byte-for-byte and verify
+ * the hash.
+ *
+ * THE BASELINE RUNS FIRST, AND A RED BASELINE IS NOT EVIDENCE (P3-3). `test/status.test.mjs`
+ * contains the Chromium layout measurement. In the DSH sandbox Chromium cannot start, so the
+ * suite is red there for an ENVIRONMENT reason. Counting that red as a caught mutant made
+ * every mutant "caught". `tooling/mutation-verdict.mjs` classifies the run: only a REAL
+ * failing assertion next to a passing test can catch a mutant, and a baseline that produces
+ * no verdict is NOT RUN (exit 2, printed by name — including "the browser exited early with
+ * ..."). A surviving mutant is exit 1, so the two can never be confused.
+ *
+ * EXIT CODES: 0 every mutant caught; 1 a surviving/partial mutant; 2 NOT RUN (no verdict —
+ * not a pass); 3 source integrity failure; 4 APPLY-FAILED (an unusable mutant anchor).
  *
  * Usage: node tooling/mutation-check-client.mjs [M1 M4 ...]
  */
@@ -12,6 +24,15 @@ import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { runCaptured } from './child-output.mjs'
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
+import {
+  EXIT_APPLY_FAILED,
+  EXIT_MISSED,
+  EXIT_NOT_RUN,
+  EXIT_OK,
+  EXIT_SOURCE_CHANGED,
+  classifyBaseline,
+  classifyMutant,
+} from './mutation-verdict.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const FILE = `${ROOT}/lib/client.js`
@@ -161,68 +182,118 @@ async function main() {
       console.log(`${LABEL}: mutation lock acquired`)
       original = readFileSync(FILE, 'utf8')
       const before = sha(original)
+      const selected = MUTANTS.filter(mutant => only.size === 0 || only.has(mutant.id))
+      const runSuite = () =>
+        runCaptured(process.execPath, ['--test', '--test-isolation=none', 'test/status.test.mjs'], {
+          cwd: ROOT,
+        })
 
-      function failingTests(output) {
-        const names = new Set()
-        for (const match of output.matchAll(/^✖ (.+?)(?: \(\d+(?:\.\d+)?ms\))?$/gm)) {
-          const name = match[1].trim()
-          if (name !== 'failing tests:') names.add(name)
-        }
-        return [...names]
-      }
+      // THE BASELINE IS THE FIRST PIECE OF EVIDENCE. `node run-unit-tests.mjs` sets
+      // DSH_WORKFLOW_SANDBOX, but this harness spawns the file directly — so in the DSH sandbox
+      // the layout case reaches Chromium and fails to start the browser. That red is an
+      // environment failure, not a caught mutant, and no mutant is counted from it.
+      const baseline = classifyBaseline(runSuite())
+      console.log(
+        `baseline (unmutated): ${baseline.verdict === 'green' ? 'GREEN' : 'NOT RUN'} — ${baseline.reason}`,
+      )
 
-      // A CRLF checkout must not turn a valid anchor into a skipped mutant.
-      const normalised = original.replace(/\r\n/g, '\n')
       const rows = []
-      for (const mutant of MUTANTS) {
-        if (only.size > 0 && !only.has(mutant.id)) continue
-        const occurrences = normalised.split(mutant.find).length - 1
-        if (occurrences !== 1) {
-          rows.push({ ...mutant, applied: false, problem: `literal occurs ${occurrences}x` })
-          continue
+      if (baseline.verdict !== 'green') {
+        console.log(
+          `NOT RUN: the unmutated baseline produced no verdict, so no mutant is counted. ` +
+            `${selected.length} mutant(s) would have been applied and judged: ` +
+            `${selected.map(mutant => mutant.id).join(', ')}. This is NOT a pass ` +
+            `(exit ${EXIT_NOT_RUN}); run this harness in a normal terminal with a Chromium-family browser.`,
+        )
+        for (const mutant of selected) {
+          rows.push({
+            ...mutant,
+            verdict: 'not-run',
+            reason: `the unmutated baseline is NOT RUN — ${baseline.reason}`,
+          })
         }
-        const mutated = normalised.replace(mutant.find, mutant.replace)
-        let output = ''
-        let status = null
-        try {
-          writeFileSync(FILE, mutated, 'utf8')
-          const run = runCaptured(
-            process.execPath,
-            ['--test', '--test-isolation=none', 'test/status.test.mjs'],
-            { cwd: ROOT },
-          )
-          output = `${run.stdout}${run.stderr}`
-          status = run.status
-        } finally {
-          restore()
+      } else {
+        // A CRLF checkout must not turn a valid anchor into a skipped mutant.
+        const normalised = original.replace(/\r\n/g, '\n')
+        for (const mutant of selected) {
+          const occurrences = normalised.split(mutant.find).length - 1
+          if (occurrences !== 1) {
+            rows.push({
+              ...mutant,
+              verdict: 'apply-failed',
+              problem: `literal occurs ${occurrences}x`,
+            })
+            continue
+          }
+          const mutated = normalised.replace(mutant.find, mutant.replace)
+          let result
+          try {
+            writeFileSync(FILE, mutated, 'utf8')
+            result = classifyMutant(runSuite(), mutant.must)
+          } finally {
+            restore()
+          }
+          rows.push({
+            ...mutant,
+            verdict: result.verdict,
+            red: result.verdict === 'caught' || result.verdict === 'partial',
+            failed: result.failures.map(failure => failure.name),
+            environmentFailures: result.environmentFailures.map(failure => failure.name),
+            missing: result.missing ?? [],
+            reason: result.reason,
+          })
         }
-        const failed = failingTests(output)
-        const missed = mutant.must.filter(name => !failed.includes(name))
-        rows.push({ ...mutant, applied: true, red: status !== 0, failed, missed, caught: failed.length > 0 && missed.length === 0 })
       }
 
       restore()
       const after = sha(readFileSync(FILE, 'utf8'))
       console.log('=== B5.2 MUTATION RESULTS ===')
       for (const row of rows) {
-        if (!row.applied) {
+        if (row.verdict === 'apply-failed') {
           console.log(`${row.id.padEnd(4)} APPLY-FAILED  ${row.problem}`)
           continue
         }
-        const mark = row.caught ? 'CAUGHT ' : row.red ? 'PARTIAL' : 'MISSED '
-        console.log(`${row.id.padEnd(4)} ${mark} red=${row.red ? 'yes' : 'no '} count=${row.failed.length}`)
+        const mark =
+          row.verdict === 'caught'
+            ? 'CAUGHT '
+            : row.verdict === 'partial'
+              ? 'PARTIAL'
+              : row.verdict === 'missed'
+                ? 'MISSED '
+                : 'NOT RUN'
+        console.log(`${row.id.padEnd(4)} ${mark} red=${row.red ? 'yes' : 'no '} count=${(row.failed ?? []).length}`)
         console.log(`     what: ${row.what}`)
-        if (row.missed.length) console.log(`     NOT failing: ${row.missed.join(' ; ')}`)
-        if (row.failed.length) console.log(`     failing: ${row.failed.slice(0, 4).join(' ; ')}${row.failed.length > 4 ? ` (+${row.failed.length - 4})` : ''}`)
+        if (row.missing?.length) console.log(`     NOT failing: ${row.missing.join(' ; ')}`)
+        if (row.environmentFailures?.length) {
+          console.log(`     environment failure (NOT counted): ${row.environmentFailures.join(' ; ')}`)
+        }
+        if (row.failed?.length) {
+          console.log(`     failing: ${row.failed.slice(0, 4).join(' ; ')}${row.failed.length > 4 ? ` (+${row.failed.length - 4})` : ''}`)
+        }
+        if (row.verdict === 'not-run' || row.verdict === 'partial') {
+          console.log(`     reason: ${row.reason}`)
+        }
       }
       console.log(`\nsource restored byte-for-byte: ${before === after ? 'YES' : 'NO — INVESTIGATE'}`)
-      // AN APPLY-FAILED MUTANT IS NOT A PASS. This harness used to print the rows and exit 0,
-      // so a CRLF checkout silently skipped 3 of 13 mutants while looking green.
-      const applyFailed = rows.filter(row => !row.applied).length
-      const notCaught = rows.filter(row => row.applied && !row.caught).length
-      if (before !== after) process.exitCode = 3
-      else if (applyFailed > 0) process.exitCode = 2
-      else if (notCaught > 0) process.exitCode = 1
+
+      const count = verdict => rows.filter(row => row.verdict === verdict).length
+      console.log(
+        `caught ${count('caught')}; partial ${count('partial')}; missed ${count('missed')}; ` +
+          `not run ${count('not-run')}; apply-failed ${count('apply-failed')}`,
+      )
+
+      // AN APPLY-FAILED MUTANT IS NOT A PASS, and neither is NOT RUN. They get different
+      // non-zero codes so a missing verdict can never be read as a surviving mutant, or as a
+      // pass. 2 is the lock probe's NOT RUN code; 1 is the surviving-mutant code.
+      let exitCode = EXIT_OK
+      if (before !== after) exitCode = EXIT_SOURCE_CHANGED
+      else if (count('apply-failed') > 0) exitCode = EXIT_APPLY_FAILED
+      else if (count('not-run') > 0) exitCode = EXIT_NOT_RUN
+      else if (count('partial') + count('missed') > 0) exitCode = EXIT_MISSED
+      if (exitCode === EXIT_NOT_RUN) {
+        console.log(`NOT RUN: no honest verdict exists here, so this is NOT a pass (exit ${EXIT_NOT_RUN}).`)
+      }
+      process.exitCode = exitCode
     },
     { label: LABEL },
   )
