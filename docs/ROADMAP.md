@@ -239,16 +239,21 @@ the host's own function), or an explicit decision to leave it out.
 
 ## Known defects and debts
 
-### `modules.handoffDoc` is a switch with no implementation
-**What it is.** `modules.handoffDoc` (default `true`) is declared in `lib/config.js`, rendered on the
-settings page and listed by `workflow_status`, but **no code reads it**: there is no handoff-document
-renderer and no test. Switching it off or on changes nothing — a user-visible knob that lies.
+### `modules.handoffDoc` — FIXED (2026-11-01): it was a switch with no implementation
+**What it was.** `modules.handoffDoc` (default `true`) was declared in `lib/config.js`, rendered on the
+settings page and listed by `workflow_status`, but **no code read it**: there was no handoff-document
+renderer and no test. Switching it off or on changed nothing — a user-visible knob that lied.
 **How it was found.** The dogfood pass (2026-11-01) went looking for the "handoff doc output" the module
 name promises and there was none.
-**Why it is unfinished.** Two honest fixes exist and they are different features: implement the document
-(the module's name says what it would be), or remove the switch (a config migration, with the settings
-page and the status list to update). Neither is a one-line change, and picking one is a product decision.
-**What it would take.** A decision, then one of the two, plus the tests that keep it from drifting back.
+**What was decided.** The user chose to IMPLEMENT the document rather than remove the switch.
+**What it does now.** Entering `HANDOFF` writes a markdown brief to `.dsh/HANDOFF.md`
+(`lib/handoff.js`, triggered by `enterHandoff` in `lib/advance.js`): the phase, every feature with its
+pass/fail and `FRESH` / `STALE` / `UNKNOWN` review state, the last verdict per feature, the
+`COMMIT`/`HANDOFF` blockers, the open constraints and the next legal moves. `workflow_status` renders
+a bounded three-line summary of the same builder. The target is a constant inside `.dsh/` — never the
+tracked repository-root `HANDOFF.md` — so the generated file cannot enter a diff or a review's
+`changed_files`. `modules.handoffDoc: false` writes no file and removes the status section. Pinned by
+`test/handoff.test.mjs`; see `docs/USAGE.md` §4.
 
 ### The gate cannot authorise its own first deployment
 **What it is.** A chicken-and-egg loop, and it is structural, not a bug in the ordinary sense. The copy

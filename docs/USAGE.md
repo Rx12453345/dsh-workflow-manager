@@ -111,6 +111,32 @@ INIT → PLAN → PICK → NEGOTIATE → BUILD → VERIFY → EVALUATE → COMMI
   exists). Every other recipe keeps the plain graph. `workflow_status` and the advance reply both
   name the extra move rather than reporting a graph the project does not have.
 
+### The handoff brief: `.dsh/HANDOFF.md`
+
+When a project **enters `HANDOFF`**, the framework writes a short markdown brief to
+`.dsh/HANDOFF.md` — the document that lets the next session start cold. It names:
+
+- the phase and the feature counts;
+- **every feature**, with pass/fail and whether its recorded review still covers the files on disk
+  (`FRESH` / `STALE` / `UNKNOWN`), the last review recorded for it (verdict, overall score, date),
+  and the reason a `STALE` PASS no longer applies;
+- the **blockers** `COMMIT`/`HANDOFF` apply to this state: stale reviews, open features, and the
+  waiver that was recorded (if any);
+- the **open constraints** (`id`, rule, status) and their retirement conditions;
+- the **next legal moves** the phase machine allows.
+
+`workflow_status` prints a bounded summary of the same builder — the path with its size and
+modification time, the complete / open / stale counts, and one next action. The full brief is on
+disk; the status output deliberately does not inline it.
+
+Switching `modules.handoffDoc` **off** (settings page, or `workflow_set path=modules.handoffDoc
+value=false`) writes no file and removes the status section.
+
+`.dsh/HANDOFF.md` is **not** the repository's own `HANDOFF.md`: the root file is a human-written
+document and is never touched. `.dsh/` is the workflow's directory (gitignored), so the generated
+brief never appears in `git status` and can never be declared as a reviewed file. Do not hand-edit
+it — it is regenerated from the state, and a later `HANDOFF` entry overwrites it.
+
 ---
 
 ## 5. Four mechanisms worth knowing

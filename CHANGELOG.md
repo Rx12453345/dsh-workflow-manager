@@ -22,6 +22,34 @@ live until it has been synced and DSH restarted.
 
 ## [Unreleased] — 2026-11-01
 
+### Added — the handoff brief (`modules.handoffDoc` finally writes something)
+
+`modules.handoffDoc` (default `true`, rendered on the settings page, listed by `workflow_status`) was
+declared since the first version and read by **no code**: switching it changed nothing. It now
+implements the document its name promises.
+
+- **`lib/handoff.js` (new)** renders a markdown brief from the live state — the phase, every feature
+  with its pass/fail and whether its review still covers the files on disk (`FRESH` / `STALE` /
+  `UNKNOWN`), the last recorded review per feature (verdict, overall score, date), the blockers
+  `COMMIT`/`HANDOFF` would enforce, the open constraints and the next legal moves — and writes it to
+  `.dsh/HANDOFF.md` when the project **enters `HANDOFF`** (`enterHandoff` in `lib/advance.js`).
+- **The target is `.dsh/HANDOFF.md`, never the repository's tracked root `HANDOFF.md`** (the
+  incident brief). The path is a constant, not a parameter, and `assertHandoffDocTarget` refuses
+  anything whose name is not `HANDOFF.md` directly under the project's `.dsh` directory. `.dsh/` is
+  gitignored here, so the generated file never appears in `git status`, never enters a diff and can
+  never be declared in a review's `changed_files`.
+- **Regeneration is byte-idempotent.** The timestamp line defaults to the state's `updated_at`
+  instead of "now", so the same state renders the same bytes; the file is replaced, never appended.
+- **The switch is honoured.** `modules.handoffDoc: false` writes no file **and** removes the
+  `workflow_status` section; an inert project renders no section either.
+- **`workflow_status` renders a bounded summary** of the same builder — the path with its size and
+  modification time, the complete/open/stale counts, and one next action. Three lines: the full
+  brief is on disk, and inlining it would make an already-long status report truncated.
+- **`test/handoff.test.mjs`** (8 cases) pins the brief's content, the off switch, the `.dsh/`-only
+  target, the idempotent rewrite, the bounded status section with counts matching the state, and a
+  project with no review evidence. A failing write is reported in the `workflow_advance` reply
+  rather than turning a legal `HANDOFF` move into a failure.
+
 ### Fixed — a browser-only red counted as a caught mutant in the three UI harnesses
 
 `mutation-check-client.mjs`, `mutation-check-panel.mjs` and `mutation-check-project-tab.mjs`
