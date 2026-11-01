@@ -7,7 +7,10 @@ This file exists because the project has a documented history of documents claim
 not true. Nothing here is inferred to work. Where two sources disagree, both are named.
 
 Sources: `NEXT-STEPS.md` line numbers (the development journal), `TESTING.md`, and `package.json`.
-Where an item was checked directly against the repository during this documentation pass, it says so.
+**`NEXT-STEPS.md` is NOT part of this repository** — it is the session journal the checkout was
+reconstructed from, so its line references cannot be opened from a clone; they are kept because they
+date every claim to the entry it came from. Where an item was checked directly against the repository
+during this documentation pass, it says so.
 
 ---
 
@@ -52,9 +55,8 @@ against `git status` — RESOLVED (2026-10-25)" below.
 Items implemented and, at the time of writing, not exercised on a real host. Listed because
 "unverified is not broken, but unverified means you do not know". The three UI surfaces and the
 `verification.policy` path below carry a dated, partial verification (the record directly below this
-line), and one later entry names a real-host run of its own — `workflow_gc`'s `retire` refusal. Every
-other entry here has no dated real-host record; where an entry says otherwise, that entry is the
-evidence to read.
+line), and one later entry names a real-host run of its own — `workflow_gc`'s `retire` refusal. The
+exceptions named in this paragraph are the only entries in the section with a dated real-host record.
 
 **Verified on a real host on 2026-11-01 — the coarse walk-through only.** After deploying 0.4.0 and
 restarting, a human walked five checks and reported all of them correct: the settings page rendered

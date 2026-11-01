@@ -554,9 +554,10 @@ was corrected by a docs-only follow-up after deployment; no code changed.
   unchanged, no existing file is migrated, and `workflow_status` lists units and reports nothing when
   there are none. Unit ids are a **path segment**, so an unusable id is refused rather than sanitised.
   **Not deployed** — the journal records this as deliberately not synced, and warns that the sync must
-  carry the new `lib/work-unit.js` or tool registration fails at import; `TESTING.md` §6 later records
-  it as verified on a real host, which implies a sync happened afterwards. The two sources are not
-  reconciled here.
+  carry the new `lib/work-unit.js` or tool registration fails at import. No record in this repository
+  shows the later sync: an earlier revision of this paragraph pointed at "`TESTING.md` §6", which
+  records the working discipline, not a work-unit run, so that pointer was wrong and the question is
+  left open here.
 - **The sidebar 「工作流设置」 panel.** A sidebar entry plus its body, registered from the existing
   browser bundle (not a second bundle: a `<package>/panel` row can never ship one), gated by
   `showInSidebar`. Turning the panel off leaves the six tools working — "panel disabled, tools
