@@ -585,7 +585,7 @@ const MUTANTS = [
     id: 'M49',
     what: 'the self-deployment exemption starts firing for shell transports, whose command can act on unnamed paths',
     file: 'lib/approval.js',
-    find: `  if (SHELL_TOOLS.has(name)) return null // 2.`,
+    find: `  if (SHELL_TOOLS.has(name) || SHELL_NAME_RE.test(name)) return null // 2.`,
     replace: `  if (false) return null // 2.`,
     suite: 'unit',
     expect: /shell|command/,
@@ -795,6 +795,24 @@ const MUTANTS = [
     replace: `      if (false) return`,
     suite: 'unit',
     expect: /names a location outside|slash-prefixed/,
+  },
+  {
+    id: 'M71',
+    what: 'the self-deployment exemption checks the shell name LIST again, so an unknown shell name with a package destination is authorised as low',
+    file: 'lib/approval.js',
+    find: `  if (SHELL_TOOLS.has(name) || SHELL_NAME_RE.test(name)) return null // 2.`,
+    replace: `  if (SHELL_TOOLS.has(name)) return null // 2.`,
+    suite: 'unit',
+    expect: /shell-shaped name|shell NAME|exempt/i,
+  },
+  {
+    id: 'M72',
+    what: 'the exemption reads PATH_KEYS again instead of the shape-aware destinations, so an unenumerated absolute path is authorised',
+    file: 'lib/approval.js',
+    find: `      paths: collectDestinations(args).destinations,`,
+    replace: `      paths: collectPathArguments(args),`,
+    suite: 'unit',
+    expect: /outside shape destination|shape-aware|not be authorised/i,
   },
 ]
 

@@ -63,12 +63,17 @@ the same hole a level down: they were recognised only by an enumerated key, so
 Classification is now by **shape**: a tool whose name looks like a shell, or a call that carries a
 program body under a command key, is `medium` (the name list is kept as a fast path); a string value
 that is an absolute path is a destination whatever its key is called — except under a key that names
-TEXT, because `ops_grep{pattern: "/etc/passwd"}`, `edit{old_string: "/api/v1"}` and
-`subagent{prompt: "/plan this"}` are not destinations and the false reason was itself a denial at the
-default strength; and `cwd`/`workdir` are judged as
+TEXT (`pattern`/`queries`/`old_string`/`content`/`prompt`/…), because `ops_grep{pattern: "/etc/passwd"}`,
+`edit{old_string: "/api/v1"}`, `web_search{queries: ["/usr/share/doc"]}` and `subagent{prompt: "/plan
+this"}` are not destinations and the false reason was itself a denial at the default strength; and
+`cwd`/`workdir`/`cd` are judged as
 working directories with their own reason instead of being counted as destinations. Exemptions,
-exfiltration precedence, the unknown-tool default (`null` = defer) and the self-deployment exemption are
-unchanged, and three mutants were added to `tooling/mutation-check-approval.mjs` for the new rules.
+exfiltration precedence and the unknown-tool default (`null` = defer) are unchanged. The
+self-deployment exemption now shares both shape tests — a shell-looking NAME cannot reach it just
+because the call carries no command key, and it reads the same shape-aware destination set, so an
+unlisted absolute path outside the package removes the exemption instead of being invisible to it;
+the installed copy's own conditions are otherwise unchanged. Six mutants were added to
+`tooling/mutation-check-approval.mjs` for these rules.
 
 ### Fixed — `workflow_gc action=list` could not read back what it recorded
 

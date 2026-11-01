@@ -304,10 +304,25 @@ layer disappeared exactly on the destinations it exists for.
 
 Fix: classify by **shape** — the name looks like a shell, or the call carries a program body under a
 command key (excluding `query`, which is text to search for, not a program); a string value that is an
-absolute path is a destination whatever its key is called; `cwd`/`workdir` are working directories with
-their own reason, not destinations. The name list stays as a fast path; the shape rules are what keep the
-gate alive when the host repackages its tools. Three mutants in `tooling/mutation-check-approval.mjs` pin
-the new rules. **VERIFIED.**
+absolute path is a destination whatever its key is called; `cwd`/`workdir`/`cd` are working directories
+with their own reason, not destinations. The name list stays as a fast path; the shape rules are what
+keep the gate alive when the host repackages its tools. **VERIFIED.**
+
+### A shape rule needs the OTHER half: text is not a place
+The first version of the shape rule read EVERY string as a possible destination, and the 2026-11-01
+review found it reachable in the wrong direction: `ops_grep{pattern: "/etc/passwd"}` became `medium`
+with the reason "the pattern argument names a location outside the project", and so did
+`edit{old_string: "/api/v1"}`, `write{content: "/usr/local"}`, `subagent{prompt: "/plan this"}` and the
+host's real `web_search{queries: ["/usr/share/doc"]}`. A false reason is not harmless — at the default
+strength an unanswered ask is a denial. The fix is a SECOND list (`TEXT_KEYS`: pattern/queries/
+old_string/content/prompt/…) that exempts text from the shape branch, and its safe direction is the
+opposite of `SHELL_TOOLS`': a text key missing from it means an EXTRA review, not no review.
+
+The same round found the exemption reaching around the new rules: its shell check was still the name
+list, so `ops_bash{script_path: "<package>/lib/x.sh"}` (no command key) reached it and classified low.
+Both shape tests are now shared with the classifier, and the exemption reads the shape-aware
+destination set — so an unlisted absolute path outside the package removes the exemption instead of
+being invisible to it. Six mutants pin the rules, including one for each half. **VERIFIED.**
 
 ---
 

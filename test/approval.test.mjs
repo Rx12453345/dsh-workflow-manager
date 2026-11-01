@@ -356,6 +356,10 @@ test('a shell and a destination are recognised by SHAPE, not by a name list', ()
       [{ name: 'write', arguments: { content: '/usr/local' } }, null, 'path-like file CONTENT'],
       [{ name: 'subagent', arguments: { prompt: '/plan this' } }, null, 'a prompt that starts with a slash'],
       [{ name: 'web_search', arguments: { query: '/usr/share/doc' } }, null, 'a slash-prefixed query'],
+      // ...and the host's ACTUAL keys, measured 2026-11-01: `queries: string[]` and `cd`, not
+      // the singular/`cwd` spellings the first round of this test assumed.
+      [{ name: 'web_search', arguments: { queries: ['/usr/share/doc', '/etc/passwd'] } }, null, 'a slash-prefixed queries array'],
+      [{ name: 'working_directory', arguments: { cd: 'C:/Windows' } }, 'medium', 'the host key for a working directory'],
       // working directories are judged as working directories (new), not as destinations
       [{ name: 'ops_write', arguments: { workdir: 'C:/Windows' } }, 'medium', 'a working directory outside the project'],
       [{ name: 'ops_write', arguments: { workdir: dir } }, 'low', 'a working directory inside the project'],
@@ -374,6 +378,10 @@ test('a shell and a destination are recognised by SHAPE, not by a name list', ()
     // so only the reason pins that `cwd`/`workdir` were judged as working directories at all.
     assert.match(
       classifyRisk(makeExec({ cwd: dir, name: 'ops_write', arguments: { workdir: 'C:/Windows' } }), gate).reason,
+      /working directory outside the project/,
+    )
+    assert.match(
+      classifyRisk(makeExec({ cwd: dir, name: 'working_directory', arguments: { cd: 'C:/Windows' } }), gate).reason,
       /working directory outside the project/,
     )
 
@@ -2182,6 +2190,42 @@ test('classifyRisk authorises a call whose destination is inside this plugin’s
   assert.equal(verdict.selfDeployment.destinations, 1)
   assert.equal(verdict.selfDeployment.sources, 0)
   assert.match(verdict.reason, /installed package/)
+})
+
+test('the exemption reads shape-aware destinations, and a shell NAME cannot reach it', () => {
+  const root = selfInstallRoot()
+  const gate = gateOf({})
+
+  // 1. A shape-only destination OUTSIDE the package removes the exemption: the call is judged
+  //    by step 6 and called medium, instead of being authorised by the destinations the old
+  //    PATH_KEYS walk could see (round-2 review: reverting this wiring left the suite green).
+  const outside = classifyRisk(
+    makeExec({ name: 'sync_tool', arguments: { destination_file: 'C:/Windows/x.dll' } }),
+    gate,
+  )
+  assert.equal(outside.risk, 'medium')
+  assert.equal(outside.selfDeployment, undefined, 'an outside shape destination must not be authorised')
+
+  // 2. A destination inside the package does not rescue a call that also names one outside it.
+  const mixed = classifyRisk(
+    makeExec({
+      name: 'sync_tool',
+      arguments: { path: join(root, 'lib', 'x.js'), destination_file: 'C:/Windows/x.dll' },
+    }),
+    gate,
+  )
+  assert.equal(mixed.risk, 'medium')
+  assert.equal(mixed.selfDeployment, undefined)
+
+  // 3. A SHELL-NAMED tool does not reach the exemption merely because its destination is inside
+  //    the package and it carries no command key. Reachable in the installed layout: this is
+  //    what round 2 reproduced as low-vs-medium.
+  const shell = classifyRisk(
+    makeExec({ name: 'ops_bash', arguments: { script_path: join(root, 'lib', 'x.sh') } }),
+    gate,
+  )
+  assert.equal(shell.risk, 'medium')
+  assert.equal(shell.selfDeployment, undefined, 'a shell-shaped name must not be exempted')
 })
 
 test('containmentAgainst is the same rule as pathContainment, against an arbitrary root', () => {
