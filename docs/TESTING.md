@@ -261,11 +261,12 @@ the caught count; the browser failure is reported separately and excluded.
 **The end-to-end proof needs a normal terminal — and has been produced once there.** The classifier
 is pinned without a browser by `test/mutation-verdict.test.mjs`, but whether a real browser run still
 catches the mutants can only be measured in a normal terminal with a Chromium-family browser. That
-measurement exists: on **2026-11-01** the three harnesses ran there — the counts are recorded in the
-paragraph above, together with the one declared-equivalent mutant. It is a dated result, not a standing
-guarantee: an in-sandbox run is still **NOT RUN** (exit 2) and says nothing about the rendered layout,
-and every future run needs that terminal again. The remaining, unwalked checks are tracked in
-[ROADMAP.md](ROADMAP.md) §"The sidebar panel rendering (B6)" and §"The project tab manual checklist".
+measurement exists: on **2026-11-01** the three harnesses ran there — the counts are in the "They were
+run once on a real host" note above, together with the one declared-equivalent mutant. It is a dated
+result, not a standing guarantee: an in-sandbox run is still **NOT RUN** (exit 2) and says nothing
+about the rendered layout, and every future run needs that terminal again. The remaining, unwalked
+checks are tracked in [ROADMAP.md](ROADMAP.md) §"The sidebar panel rendering (B6)" and §"The project
+tab manual checklist".
 
 > ⚠️ **Never run two of these concurrently.** They rewrite files under `lib/`. Two at once on
 > `lib/client.js` once left **two mutants permanently in the source tree while both processes printed

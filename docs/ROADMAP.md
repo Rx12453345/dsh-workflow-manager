@@ -51,10 +51,10 @@ against `git status` — RESOLVED (2026-10-25)" below.
 
 Items implemented and, at the time of writing, not exercised on a real host. Listed because
 "unverified is not broken, but unverified means you do not know". The three UI surfaces and the
-`verification.policy` path below carry a dated, partial verification, and two later entries name a
-real-host run of their own (the structured-output record in TESTING §6, and `workflow_gc`'s `retire`
-refusal); **every other entry in this section has no dated real-host record** — where one has, the
-entry itself says so.
+`verification.policy` path below carry a dated, partial verification (the record directly below this
+line), and one later entry names a real-host run of its own — `workflow_gc`'s `retire` refusal. Every
+other entry here has no dated real-host record; where an entry says otherwise, that entry is the
+evidence to read.
 
 **Verified on a real host on 2026-11-01 — the coarse walk-through only.** After deploying 0.4.0 and
 restarting, a human walked five checks and reported all of them correct: the settings page rendered
@@ -80,10 +80,10 @@ the checklists is right" is still not.
 ### The sidebar panel rendering (B6)
 The entry on `sidebar.panellist` and the body on the root-scoped `main` slot are registered from the
 existing `lib/client.js`, gated by `showInSidebar`. It was **seen on a real host on 2026-11-01** (see
-the verification paragraph at the top of this section): the entry appears in the sidebar's
-global-panels group, clicking it projects the `main` body, it reads fine in the narrow rail, the icon
-is sane, and the recovery path works — switching `showInSidebar` off withdraws the entry and the panel
-row's own page in Settings → Plugins switches it back on. Still never looked at:
+the "Verified on a real host on 2026-11-01" record under `## Unverified`): the entry appears in the
+sidebar's global-panels group, clicking it projects the `main` body, it reads fine in the narrow rail,
+the icon is sane, and the recovery path works — switching `showInSidebar` off withdraws the entry and
+the panel row's own page in Settings → Plugins switches it back on. Still never looked at:
 - that the two `plugins.row.config` registrations (core row, panel row) do not cross-talk — the core
   row's page must **not** show the sidebar switch;
 - `whileServed` timing: it depends on the settings mirror serving `dsh-workflow-panel` first. If that
@@ -113,11 +113,12 @@ Whether the dividers and 16 px spacing look *good* is an aesthetic judgement no 
 ### The project tab manual checklist — 9 items
 The "actual effective configuration" view renders by answer-first-then-raw-text, with a per-row layer
 badge. Its logic is covered by differential tests (the host's own functions vs the browser mirror) and
-its mutant table is fully accounted for — the dated record at the top of this section carries the
-counts, including the one mutant declared behaviourally equivalent. **The rendering was seen once, on
-2026-11-01**: the tab appears per conversation, renders the effective configuration for this project,
-and shows "not opted in" (never an empty table) for a project without `.dsh/workflow.yml`. The other
-eight items were not individually walked:
+its mutant table is fully accounted for — the "Verified on a real host on 2026-11-01" record under
+`## Unverified` carries the counts, including the one mutant declared behaviourally equivalent. **The
+rendering was seen once, on 2026-11-01**: the tab appears per conversation, renders the effective
+configuration for this project, and shows "not opted in" (never an empty table) for a project without
+`.dsh/workflow.yml`. That observation is not one of the nine items below, and **none of the nine was
+individually walked**:
 Checklist (NEXT-STEPS.md:3164–3179): first screen is the effective config, not the file text; in this
 project `tier: standard` shows **本工程覆盖** and `approval.riskThreshold: medium` shows
 **继承自默认值**; the overview counts equal the table's row counts; "re-read" follows the file; changing
@@ -372,12 +373,13 @@ in `test/mutation-verdict.test.mjs`.
 
 **What still needs a human.** The end-to-end proof needs a real browser, and the sandbox cannot start
 one: an in-sandbox run is **NOT RUN** (exit 2, never a pass). That proof was produced once, on
-**2026-11-01**, in a normal terminal with a Chromium-family browser — the counts are in the dated
-record at the top of this section, and they are the counts the sandbox had never produced. They are a
-dated result, not a standing guarantee, so every future run still needs that terminal. The other
-harnesses run in-sandbox through the file-backed child capture — including
-`mutation-check-isolation.mjs` (added 2026-11-01 for the review fence) and `mutation-check-state.mjs`
-(added 2026-11-01 for the recorded state: findings, per-file digests and the judged staleness).
+**2026-11-01**, in a normal terminal with a Chromium-family browser — the counts are in the
+"Verified on a real host on 2026-11-01" record under `## Unverified`, and they are the counts the
+sandbox had never produced. They are a dated result, not a standing guarantee, so every future run
+still needs that terminal. The other harnesses run in-sandbox through the file-backed child capture —
+including `mutation-check-isolation.mjs` (added 2026-11-01 for the review fence) and
+`mutation-check-state.mjs` (added 2026-11-01 for the recorded state: findings, per-file digests and
+the judged staleness).
 
 ### Reviewer step 4 used to compare with a list that could be absent — **FIXED**
 When `workflow_review` was called with no `changed_files`, `buildReviewPrompt` omitted the "Files the
