@@ -243,6 +243,10 @@ start a captured child — `mutation-check-approval.mjs`, `mutation-check-verifi
 includes the Chromium layout measurement. They spawn the test file directly (not through
 `run-unit-tests.mjs`) and do not set `DSH_WORKFLOW_SANDBOX`, so an in-sandbox run reaches the
 browser launch, which the sandbox cannot complete.
+**They were run once on a real host (2026-11-01)**: client **14/14**, panel **28/28**, project-tab
+**58/58** caught, `missed 0`, `not run 0`, `apply-failed 0`, `partial 0`, sources restored
+byte-for-byte, exit 0. That is a dated result, not a standing guarantee — the next in-sandbox run
+prints `NOT RUN` and exit 2 again.
 
 **A red baseline is not evidence (P3-3).** The three harnesses run the unmutated baseline FIRST and
 classify it through `tooling/mutation-verdict.mjs`. A baseline that cannot produce a verdict — red

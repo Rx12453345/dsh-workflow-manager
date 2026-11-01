@@ -52,6 +52,25 @@ against `git status` — RESOLVED (2026-10-25)" below.
 Implemented, and never exercised on a real host. Listed because "unverified is not broken, but
 unverified means you do not know".
 
+**Verified on a real host on 2026-11-01 — the coarse walk-through only.** After deploying 0.4.0 and
+restarting, a human walked five checks and reported all of them correct: the settings page rendered
+both plugin rows; `verification.policy` showed the value the project file sets (not the patch-row
+default); the sidebar entry appeared and opened its body; switching `showInSidebar` off withdrew the
+entry **and** the panel row's own page switched it back on; and the conversation tab rendered per
+project, including the "not opted in" message for a project without `.dsh/workflow.yml`. The
+`showInPluginPage` removal was confirmed on the same pass: the panel row no longer offers it and the
+tab's config table no longer lists it. The three UI mutation harnesses also ran in a normal terminal:
+`client` **14/14**, `panel` **28/28**, `project-tab` **58/58** caught, with `missed 0`, `not run 0`,
+`apply-failed 0`, `partial 0` and sources restored byte-for-byte (exit 0) — the counts they had never
+produced, because the sandbox cannot start the browser.
+**What that does NOT cover.** The granular checklists below — the 11-item layout walk (divider widths,
+760 px cap, badge wrapping, the two-column settings page), the 9-item tab walk (`approval: nope`'s
+fail-closed display, `evaluator.bar: abc`'s warning, the subscription refresh without a reload), icon
+aesthetics, the `whileServed` ordering, cross-talk between the two `configForms` pages, and the absence
+of `[dsh-workflow]` console errors — were not individually walked, so each entry below keeps its
+original status. "The sidebar renders and switching works" is now known; "the layout reads well at
+every width" is still not.
+
 ### The sidebar panel rendering (B6)
 The entry on `sidebar.panellist` and the body on the root-scoped `main` slot are registered from the
 existing `lib/client.js`, gated by `showInSidebar`. **Nothing about the rendered result has been seen:
