@@ -322,7 +322,17 @@ The same round found the exemption reaching around the new rules: its shell chec
 list, so `ops_bash{script_path: "<package>/lib/x.sh"}` (no command key) reached it and classified low.
 Both shape tests are now shared with the classifier, and the exemption reads the shape-aware
 destination set — so an unlisted absolute path outside the package removes the exemption instead of
-being invisible to it. Six mutants pin the rules, including one for each half. **VERIFIED.**
+being invisible to it.
+
+TWO ORDERINGS THAT LOOK LIKE DETAILS AND ARE NOT. The next review PASSed but recorded two more of
+the same kind: (a) a working directory had to move BEFORE the exemption, because the exemption is
+handed destinations only — `write{file_path: "<package>/x.js", cd: "C:/Windows"}` came back **low**
+while the same `cd` on its own was medium, i.e. a package destination laundered the working
+directory; (b) the citation keys of `structured_output` (`verified`, `where`, `reach`,
+`observations`) had to join `TEXT_KEYS`, or a report quoting an absolute path was read as an outside
+destination — the same false reason, one tool over from `queries`. A rule that reads values by shape
+has to be checked against every tool's key vocabulary, not against the keys the first test used.
+Six mutants pin the rules, including one for each half. **VERIFIED.**
 
 ---
 

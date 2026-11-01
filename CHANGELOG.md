@@ -75,6 +75,12 @@ unlisted absolute path outside the package removes the exemption instead of bein
 the installed copy's own conditions are otherwise unchanged. Six mutants were added to
 `tooling/mutation-check-approval.mjs` for these rules.
 
+Two follow-ups the PASSing review recorded as minors, fixed in the same day: a working directory
+outside the project is checked **before** the self-deployment exemption (it received destinations
+only), so `write{file_path: "<package>/x.js", cd: "C:/Windows"}` can no longer be laundered to `low`;
+and `TEXT_KEYS` covers the structured-output citation keys (`verified`, `where`, `reach`,
+`observations`), so a report quoting an absolute path is not read as an outside destination.
+
 ### Fixed — `workflow_gc action=list` could not read back what it recorded
 
 Found while using the tool on this project (the dogfood feature): the list branch returns the entries

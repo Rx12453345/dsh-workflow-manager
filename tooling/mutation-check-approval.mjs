@@ -814,6 +814,15 @@ const MUTANTS = [
     suite: 'unit',
     expect: /outside shape destination|shape-aware|not be authorised/i,
   },
+  {
+    id: 'M73',
+    what: 'a working directory outside the project is judged AFTER the self-deployment exemption, so a package destination launders it to low',
+    file: 'lib/approval.js',
+    find: `  if (earlyWorkdirs.length > 0) {`,
+    replace: `  if (false) {`,
+    suite: 'unit',
+    expect: /medium|working directory outside the project/,
+  },
 ]
 
 function run(suite) {

@@ -360,6 +360,8 @@ test('a shell and a destination are recognised by SHAPE, not by a name list', ()
       // the singular/`cwd` spellings the first round of this test assumed.
       [{ name: 'web_search', arguments: { queries: ['/usr/share/doc', '/etc/passwd'] } }, null, 'a slash-prefixed queries array'],
       [{ name: 'working_directory', arguments: { cd: 'C:/Windows' } }, 'medium', 'the host key for a working directory'],
+      [{ name: 'structured_output', arguments: { issues: [{ where: '/srv/app/x.js' }] } }, null, 'a citation path'],
+      [{ name: 'structured_output', arguments: { verified: ['/srv/app/x.js'], observations: ['/tmp/x'] } }, null, 'citation arrays'],
       // working directories are judged as working directories (new), not as destinations
       [{ name: 'ops_write', arguments: { workdir: 'C:/Windows' } }, 'medium', 'a working directory outside the project'],
       [{ name: 'ops_write', arguments: { workdir: dir } }, 'low', 'a working directory inside the project'],
@@ -2226,6 +2228,20 @@ test('the exemption reads shape-aware destinations, and a shell NAME cannot reac
   )
   assert.equal(shell.risk, 'medium')
   assert.equal(shell.selfDeployment, undefined, 'a shell-shaped name must not be exempted')
+
+  // 4. A working directory outside the project is an escalation BEFORE the exemption runs, so a
+  //    package destination cannot launder it (round-3 review, found by the PASSing round as a
+  //    minor: this call came back LOW while the same `cd` alone was medium).
+  const laundered = classifyRisk(
+    makeExec({
+      name: 'write',
+      arguments: { file_path: join(root, 'lib', 'x.js'), cd: 'C:/Windows' },
+    }),
+    gate,
+  )
+  assert.equal(laundered.risk, 'medium')
+  assert.match(laundered.reason, /working directory outside the project/)
+  assert.equal(laundered.selfDeployment, undefined)
 })
 
 test('containmentAgainst is the same rule as pathContainment, against an arbitrary root', () => {
