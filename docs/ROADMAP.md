@@ -345,7 +345,10 @@ author says changed" section, but step 4 still read "compare it with the files t
 there was no list above. Step 4 now branches on whether the list was rendered: with a list it says to
 compare against it, and with none it says git is the only scope evidence and drops the "listed above"
 phrase. Both branches are asserted in `test/review.test.mjs`, so reverting the branch turns the suite red
-(a review proved the wording was unpinned before that test existed).
+(a review proved the wording was unpinned before that test existed). **The git cross-check section was
+the same defect and is fixed the same way**: an explicitly EMPTY `changed_files` array (valid per the
+schema) rendered "the list above" with no list section at all — found by the 2026-11-01 re-review,
+gated on the same array, and pinned in the same test.
 
 ### `approvalMirrorable`'s conservative choice (runtime-unreachable)
 The project tab requires the defaults layer to *carry* an `approval` section, so a malformed

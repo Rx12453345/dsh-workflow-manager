@@ -524,6 +524,46 @@ test('step 4 points at a file list only when a list was rendered', () => {
   assert.match(withoutList, /assuming the change is complete/)
 })
 
+test('the git cross-check never points at a file list that was not rendered', () => {
+  // THE SECOND HALF OF THE SAME DEFECT (found by the 2026-11-01 re-review). Step 4 was gated on
+  // the rendered list, but the git cross-check section still said "the list above" for an
+  // explicitly EMPTY `changed_files` (the schema accepts it) with a live git audit — a prompt
+  // pointing at a section it had not rendered, in the same prompt as a step 4 that says no list
+  // was supplied. `hasList` is that one fact, and both sections read it.
+  const gitChanges = {
+    checked: true,
+    complete: true,
+    missing: ['lib/undeclared.js'],
+    unused: [],
+    excluded: [],
+    untracked: [],
+    deleted: [],
+  }
+  const empty = buildReviewPrompt({ feature: 'x', changedFiles: [], gitChanges })
+  assert.doesNotMatch(empty, /## Files the author says changed/)
+  assert.doesNotMatch(empty, /list above/i, 'no "list above" when no list was rendered')
+  assert.doesNotMatch(empty, /THE LIST ABOVE WAS INCOMPLETE/)
+  assert.match(empty, /NO FILE LIST WAS SUPPLIED/)
+  assert.match(empty, /lib\/undeclared\.js/)
+  assert.match(empty, /no file list was supplied, so git is the only scope evidence|no file list was supplied, so/)
+
+  // A NON-empty list keeps the wording that points at it. When git ALSO reports an undeclared
+  // path the merged section is titled "Files this change covers", so match either heading.
+  const listed = buildReviewPrompt({ feature: 'x', changedFiles: ['lib/a.js'], gitChanges })
+  assert.match(listed, /## Files (this change covers|the author says changed)/)
+  assert.match(listed, /THE LIST ABOVE WAS INCOMPLETE/)
+  assert.doesNotMatch(listed, /NO FILE LIST WAS SUPPLIED/)
+
+  // A not-checked audit gets the matching no-list sentence too.
+  const notChecked = buildReviewPrompt({
+    feature: 'x',
+    changedFiles: [],
+    gitChanges: { checked: false, reason: 'the project is not a git checkout', missing: [] },
+  })
+  assert.match(notChecked, /No file list was supplied either/)
+  assert.doesNotMatch(notChecked, /the list above is the caller/i)
+})
+
 test('the advertised output schema is an object schema with the required fields', () => {
   assert.equal(REVIEW_OUTPUT_SCHEMA.type, 'object')
   assert.deepEqual(REVIEW_OUTPUT_SCHEMA.required, ['perDimension', 'issues'])

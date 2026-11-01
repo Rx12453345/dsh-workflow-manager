@@ -39,3 +39,6 @@ desktop.ini
 
 # Packaging output
 *.tgz
+
+# The mutation harnesses' mutual-exclusion lock (and its temp files) are transient by design.
+tooling/.mutation-lock*

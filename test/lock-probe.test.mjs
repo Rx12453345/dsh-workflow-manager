@@ -111,7 +111,11 @@ test('classifyRun: exit 0 with a failure count is NOT RUN, not GREEN', () => {
   const inconsistent = { status: 0, signal: null, error: null, stdout: FAIL_OUTPUT, stderr: '' }
   const classification = classifyRun(inconsistent)
   assert.equal(classification.verdict, 'NOT RUN')
-  assert.match(classification.reason, /exited 0 without a failing test next to a passing one/)
+  // THE SENTENCE MUST DESCRIBE WHAT THE SUMMARY SHOWS, not deny it: the failure is the
+  // contradictory exit code, and the failing count is part of the evidence. The old wording said
+  // "exited 0 without a failing test next to a passing one" while the summary listed two.
+  assert.match(classification.reason, /exited 0 while reporting 2 failing test/)
+  assert.match(classification.reason, /contradictory result is not evidence/)
   assert.match(classification.detail, /exit 0, tests 30, pass 25, fail 2/)
 })
 

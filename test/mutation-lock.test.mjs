@@ -32,10 +32,10 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { skipInSandbox } from './sandbox.mjs'
 
@@ -44,6 +44,7 @@ import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from '../tooling/m
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
 const HOLDER_CHILD = join(ROOT, 'tooling', 'mutation-lock-holder-child.mjs')
 const ATTACKER_CHILD = join(ROOT, 'tooling', 'mutation-lock-attacker-child.mjs')
+const RACER_CHILD = join(ROOT, 'tooling', 'mutation-lock-racer-child.mjs')
 const scratch = mkdtempSync(join(tmpdir(), 'dsh-mutation-lock-'))
 let counter = 0
 
@@ -232,6 +233,64 @@ test('independent processes race for the lock and exactly one wins per round', a
       assert.match(loser.output, /label=the child holder/)
     }
     assert.equal(existsSync(path), false, `round ${round}: the lock is released once the winner exits`)
+  }
+})
+
+test('the same race without pipes has exactly one winner, and runs inside the sandbox', async () => {
+  // WHY THIS VARIANT EXISTS. The piped race above SKIPS in the DSH sandbox, so it only ever ran in
+  // CI — and CI is where the empty-lock race (41275458335) showed two winners. These children are
+  // spawned with `stdio: 'ignore'` and report through files instead of pipes, so the race is
+  // reproducible here. No `skipInSandbox`: if this cannot run in the sandbox, that is a defect.
+  for (let round = 1; round <= 2; round += 1) {
+    const path = freshPath()
+    const gate = `${path}.gate`
+    mkdirSync(dirname(path), { recursive: true })
+    const children = []
+    for (let index = 0; index < 4; index += 1) {
+      const resultPath = `${path}.result-${index}`
+      const child = spawn(
+        process.execPath,
+        [RACER_CHILD, path, gate, resultPath, 'the child holder', '1500'],
+        { cwd: ROOT, stdio: 'ignore' },
+      )
+      children.push({ child, resultPath })
+    }
+    // Every child is started and polling before the gate appears; otherwise process startup
+    // (~100 ms) would spread them across the winner's hold.
+    await new Promise(resolve => setTimeout(resolve, 400))
+    writeFileSync(gate, 'go', 'utf8')
+    const codes = await Promise.all(
+      children.map(
+        ({ child }) =>
+          new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              child.kill('SIGKILL')
+              reject(new Error('a racer child did not exit within 30 s'))
+            }, 30000)
+            child.on('exit', code => {
+              clearTimeout(timer)
+              resolve(code)
+            })
+          }),
+      ),
+    )
+    const outcomes = children.map(({ resultPath }, index) => ({
+      code: codes[index],
+      output: existsSync(resultPath) ? readFileSync(resultPath, 'utf8') : '(no result file)',
+    }))
+    const winners = outcomes.filter(outcome => outcome.code === 0 && outcome.output.startsWith('WON'))
+    const losers = outcomes.filter(outcome => outcome.code === EXIT_LOCK_HELD)
+    assert.equal(
+      winners.length,
+      1,
+      `round ${round}: exactly one of four took the lock: ${JSON.stringify(outcomes.map(o => [o.code, o.output.slice(0, 120)]))}`,
+    )
+    assert.equal(losers.length, 3, `round ${round}: the other three failed fast instead of queueing`)
+    for (const loser of losers) {
+      assert.match(loser.output, /another mutation harness is already running/)
+    }
+    assert.equal(existsSync(path), false, `round ${round}: the lock is released once the winner exits`)
+    rmSync(gate, { force: true })
   }
 })
 
@@ -507,9 +566,26 @@ test('a stale lock whose process was hard-killed is recovered, and the source is
   assert.equal(existsSync(path), false, 'the recovering run released normally')
 })
 
-test('a malformed lock file is treated as stale rather than as a permanent wedge', async () => {
+test('a malformed lock file is refused while it is new, then taken over once it is old', async () => {
+  // THE TWO HALVES ARE BOTH REQUIRED. A file that cannot be parsed as a holder record is stale in
+  // principle (it cannot name a holder to respect) — but a file that was just created may be a
+  // lock BEING WRITTEN, and treating that as stale is how a live holder's lock was stolen (CI run
+  // 41275458335, two winners). So: fresh ⇒ refuse, older than the grace ⇒ take over.
   const path = freshPath()
   writeLockFile(path, 'this is not JSON')
+  await assert.rejects(
+    withMutationLock(async () => {}, { label: 'the next harness', path }),
+    (error) => {
+      assert.ok(error instanceof MutationLockHeld)
+      assert.match(error.message, /cannot be read as a holder record yet/)
+      return true
+    },
+    'a lock young enough to still be written is refused, not stolen',
+  )
+  assert.equal(existsSync(path), true, 'the refusal leaves the file alone')
+
+  const old = new Date(Date.now() - 60_000)
+  utimesSync(path, old, old)
   let ran = false
   await withMutationLock(
     async () => {
@@ -517,7 +593,7 @@ test('a malformed lock file is treated as stale rather than as a permanent wedge
     },
     { label: 'the next harness', path },
   )
-  assert.equal(ran, true, 'an unreadable lock cannot name a holder, so it is not respected forever')
+  assert.equal(ran, true, 'an old unreadable lock cannot wedge the tool forever')
 })
 
 test('a thrown error releases the lock and propagates', async () => {

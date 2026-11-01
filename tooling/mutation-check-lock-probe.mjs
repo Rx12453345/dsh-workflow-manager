@@ -196,11 +196,18 @@ export function classifyRun(run) {
   if (run.status !== 0 && (summary.fail ?? 0) > 0 && (summary.pass ?? 0) > 0) {
     return { verdict: 'RED', summary, detail, reason: detail }
   }
+  // THE REASON MUST NOT DENY WHAT THE SUMMARY SHOWS. Exit 0 while reporting failures is a
+  // CONTRADICTORY result — the previous sentence ("exited 0 without a failing test next to a
+  // passing one") denied the very failing test the summary listed, and the test pinned that false
+  // wording. Found by the 2026-11-01 re-review; the two cases now say what they are.
+  const contradictory = run.status === 0 && (summary.fail ?? 0) > 0
   return {
     verdict: 'NOT RUN',
     summary,
     detail,
-    reason: `the suite exited ${run.status} without a failing test next to a passing one (${detail}); a crash or load error is not a caught mutant`,
+    reason: contradictory
+      ? `the suite exited 0 while reporting ${summary.fail} failing test(s) next to ${summary.pass} passing one(s) (${detail}); a contradictory result is not evidence`
+      : `the suite exited ${run.status} without a failing test next to a passing one (${detail}); a crash or load error is not a caught mutant`,
   }
 }
 

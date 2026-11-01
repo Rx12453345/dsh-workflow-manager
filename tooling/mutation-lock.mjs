@@ -79,13 +79,25 @@
  *   MUTATION_LOCK_TTL_MS  staleness cap in ms (default 30 minutes)
  */
 
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { linkSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** Exit code for "another mutation harness holds the lock". Distinct from 1 (a thrown error). */
 export const EXIT_LOCK_HELD = 2
+
+/**
+ * How long an UNPARSEABLE lock file is given the benefit of the doubt before it is taken over.
+ *
+ * THE RACE THIS EXISTS FOR (CI run 41275458335, Node 22). Creating a file and writing its content
+ * are two operations: a competitor can read the name before the bytes land, see an empty file,
+ * and — under "an unreadable record is stale" — tear off a LIVE holder's lock. On this filesystem
+ * the lock content is now linked into place in one step (see `createLockAtomically`), so the
+ * window is closed at the source; this grace covers the fallback path and a file written by hand.
+ * Refusing for a few seconds is cheap; stealing a live lock is how two processes both "won".
+ */
+const UNPARSEABLE_GRACE_MS = 5000
 
 /**
  * How long a lock may live before it is treated as abandoned. Generous on purpose: the unit
@@ -223,7 +235,9 @@ function describeAge(ageMs) {
 
 /**
  * Read the lock file and classify it. Never throws: an unreadable or malformed FILE is a STALE
- * lock, because it cannot name a live holder we would be obliged to respect.
+ * lock, because it cannot name a live holder we would be obliged to respect — EXCEPT while it is
+ * younger than `UNPARSEABLE_GRACE_MS`, when it may still be a lock being written and is REFUSED
+ * instead (that window is how a live holder's lock was once stolen; see `createLockAtomically`).
  *
  * The precedence, in full (see the header for why each line is where it is):
  *   no file / unparseable file      -> stale
@@ -253,6 +267,25 @@ function inspectLock(path) {
   }
 
   if (holder === null) {
+    // A LOCK BEING WRITTEN LOOKS EMPTY FOR AN INSTANT, AND THAT INSTANT USED TO LOSE A LIVE LOCK.
+    // A file younger than the grace is REFUSED, not taken over; only a genuinely old unparseable
+    // file is treated as stale. See `UNPARSEABLE_GRACE_MS` and `createLockAtomically`.
+    let ageMs = null
+    try {
+      ageMs = Date.now() - statSync(path).mtimeMs
+    } catch {
+      ageMs = null
+    }
+    if (ageMs !== null && ageMs < UNPARSEABLE_GRACE_MS) {
+      return {
+        exists: true,
+        stale: false,
+        holder: null,
+        reason:
+          `the lock file cannot be read as a holder record yet and is only ${Math.max(0, Math.round(ageMs))} ms old; ` +
+          `a lock that may still be being written is not treated as stale before ${UNPARSEABLE_GRACE_MS} ms`,
+      }
+    }
     return { exists: true, stale: true, holder: null, reason: 'lock file is not a readable holder record' }
   }
 
@@ -328,12 +361,40 @@ function inspectLock(path) {
 
 /** Create the lock file atomically. Returns true on a win, false when somebody else holds it. */
 function createLockAtomically(path, record) {
+  // THE NAME AND THE CONTENT MUST APPEAR TOGETHER. `writeFileSync(..., {flag:'wx'})` makes the
+  // NAME exclusive but leaves the file empty until the bytes are written, and a competitor reading
+  // that instant sees an unparseable record — which used to be classified stale — so it tore off
+  // the live holder's lock and BOTH processes "acquired" it (CI run 41275458335: four processes,
+  // two winners). The content is written to a temp file first and then HARD-LINKED into place:
+  // link creation is atomic and fails with EEXIST when the name is taken, so every reader either
+  // sees no lock or sees a complete record.
+  const body = JSON.stringify(record)
+  const tempPath = `${path}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`
+  writeFileSync(tempPath, body, { encoding: 'utf8', flag: 'wx' })
   try {
-    writeFileSync(path, JSON.stringify(record), { flag: 'wx', encoding: 'utf8' })
+    linkSync(tempPath, path)
     return true
   } catch (error) {
     if (error?.code === 'EEXIST') return false
+    // NOT EVERY FILESYSTEM HAS HARD LINKS (some network shares, some FAT volumes). Falling back
+    // keeps the lock usable there at the cost of the original window; that is stated, not hidden,
+    // and the unparseable grace above is the second line of defence for exactly this path.
+    if (error?.code === 'EPERM' || error?.code === 'EXDEV' || error?.code === 'ENOSYS' || error?.code === 'ENOTSUP') {
+      try {
+        writeFileSync(path, body, { flag: 'wx', encoding: 'utf8' })
+        return true
+      } catch (inner) {
+        if (inner?.code === 'EEXIST') return false
+        throw inner
+      }
+    }
     throw error
+  } finally {
+    try {
+      unlinkSync(tempPath)
+    } catch {
+      // The link left the temp name in place, or it was already gone; neither is a failure.
+    }
   }
 }
 

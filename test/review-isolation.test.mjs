@@ -620,6 +620,27 @@ test('the guarded delete uses the longer, bounded retry window and names the pat
   assert.equal(removed.path, snapshot.workDir, 'a kept copy must be findable by path')
   assert.match(removed.reason, /could not be removed/)
   assert.equal(existsSync(snapshot.workDir), true, 'the copy is still there for the human to delete')
+
+  // THE ROOT GETS THE SAME WINDOW, AND THAT IS A SEPARATE CALL. The 2026-11-01 re-review found
+  // this unpinned: a throwing seam only ever reaches the copy call, so a change that reverted the
+  // ROOT call to the old 5 x 120 ms would have kept the suite green. Here the copy delete
+  // SUCCEEDS and the seam records the second call, which removes the snapshot root.
+  const rootCalls = []
+  const secondSnapshot = createReviewSnapshot(project)
+  assert.equal(secondSnapshot.ok, true, secondSnapshot.reason)
+  const rootRemoved = removeReviewSnapshot(secondSnapshot, {
+    rm(path, options) {
+      rootCalls.push({ path, options })
+    },
+  })
+  assert.equal(rootRemoved.ok, true, rootRemoved.reason)
+  assert.equal(rootCalls.length, 2, 'the copy and the root are two separate deletes')
+  assert.equal(rootCalls[0].path, secondSnapshot.workDir)
+  assert.equal(rootCalls[1].path, secondSnapshot.rootDir, 'the second delete is the snapshot root')
+  for (const call of rootCalls) {
+    assert.equal(call.options.maxRetries, maxRetries, 'the root uses the exported window too')
+    assert.equal(call.options.retryDelay, retryDelay, 'the root uses the exported window too')
+  }
 })
 
 test('the delete guards run BEFORE the recursive delete is attempted at all', t => {

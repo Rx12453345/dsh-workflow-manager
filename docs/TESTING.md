@@ -313,8 +313,12 @@ step 4 tells the reviewer to run `git status --porcelain` in the project. When a
 was supplied, it says to compare the output with that list, and any changed path missing from it is an
 issue, scored against `scope`, `tests` or `correctness`; when **no** list was supplied (only a diff),
 the step says git is the only scope evidence and any changed path it reports is an issue, scored the
-same way — the phrase "listed above" is not emitted, because no list section is rendered. Both branches
-are pinned by `test/review.test.mjs`. The framework also reads `git status` through an argv array
+same way — the phrase "listed above" is not emitted, because no list section is rendered. **The git
+cross-check section reads the same fact**: it is gated on the same `changed_files` array, so an
+explicitly EMPTY list (accepted by the schema) renders "NO FILE LIST WAS SUPPLIED …" and never "the
+list above" — the second half of that defect was found by the 2026-11-01 re-review after step 4 alone
+had been fixed. Both branches of both sections are pinned by `test/review.test.mjs`. The framework also
+reads `git status` through an argv array
 (`lib/git-changes.js`) and adds a path the declaration omitted to the evidence, so the reviewer sees
 the omission without having to find it. Both are **evidence, not a security boundary**: `git status`
 only sees **uncommitted** changes, so a committed path is invisible and must still be declared. A real

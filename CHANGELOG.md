@@ -249,7 +249,9 @@ into `tooling/sync-plan.mjs`'s `planSync` so it can be tested without a deployme
   step says to compare `git status` against it; with none it says git is the only scope evidence and
   does not emit "listed above" (the file-list section is not rendered in that case either). Both
   branches are asserted in `test/review.test.mjs`; before that test existed, reverting the branch
-  left the suite green.
+  left the suite green. **The git cross-check section had the same defect and now reads the same
+  fact**: an explicitly EMPTY `changed_files` (schema-valid) used to render "the list above" while no
+  list section existed — found by the 2026-11-01 re-review, fixed, and pinned in the same test file.
 - **Housekeeping:** `collectGitChanges` owns its JSDoc again; `sync-plan.mjs` no longer exports its
   internal `walk`, reuses `sameTextContent`, and its `mkdir` comment states the measured truth
   (`fs.cp` creates missing destination parents); the governance harness's `PASSEED` typo is fixed,
