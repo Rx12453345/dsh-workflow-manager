@@ -628,6 +628,16 @@ test('the guarded delete uses the longer, bounded retry window and names the pat
   const rootCalls = []
   const secondSnapshot = createReviewSnapshot(project)
   assert.equal(secondSnapshot.ok, true, secondSnapshot.reason)
+  // THE SEAM DELETES NOTHING, SO THE TEST MUST. A recording-only `rm` leaves the whole snapshot
+  // root on disk (measured: one ~200 MB root per suite run, four runs -> four roots). The seam is
+  // what makes the second call observable; the cleanup is the test's job, not the module's.
+  t.after(() => {
+    try {
+      rmSync(secondSnapshot.rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch {
+      // best effort: a leftover temp root must not fail a green test
+    }
+  })
   const rootRemoved = removeReviewSnapshot(secondSnapshot, {
     rm(path, options) {
       rootCalls.push({ path, options })

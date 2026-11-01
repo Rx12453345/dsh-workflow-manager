@@ -547,12 +547,33 @@ test('the git cross-check never points at a file list that was not rendered', ()
   assert.match(empty, /lib\/undeclared\.js/)
   assert.match(empty, /no file list was supplied, so git is the only scope evidence|no file list was supplied, so/)
 
+  // THE REACHABLE ARM: a clean committed tree, no list, nothing missing. This is the shape the
+  // defect actually reached (a review called with `changed_files: []` on a clean tree), so it must
+  // be asserted too — a partial revert of the no-list branch otherwise stays green.
+  const cleanTree = buildReviewPrompt({
+    feature: 'x',
+    changedFiles: [],
+    gitChanges: { checked: true, complete: true, missing: [], unused: [], excluded: [], untracked: [], deleted: [] },
+  })
+  assert.doesNotMatch(cleanTree, /list above/i, 'a clean tree with no list still never says "list above"')
+  assert.doesNotMatch(cleanTree, /## Files the author says changed/)
+  assert.match(cleanTree, /No file list was supplied, so there was nothing to omit/)
+  assert.match(cleanTree, /git reports no changed path/)
+
   // A NON-empty list keeps the wording that points at it. When git ALSO reports an undeclared
   // path the merged section is titled "Files this change covers", so match either heading.
   const listed = buildReviewPrompt({ feature: 'x', changedFiles: ['lib/a.js'], gitChanges })
   assert.match(listed, /## Files (this change covers|the author says changed)/)
   assert.match(listed, /THE LIST ABOVE WAS INCOMPLETE/)
   assert.doesNotMatch(listed, /NO FILE LIST WAS SUPPLIED/)
+
+  // ...and a clean tree WITH a list keeps the original sentence.
+  const listedClean = buildReviewPrompt({
+    feature: 'x',
+    changedFiles: ['lib/a.js'],
+    gitChanges: { checked: true, complete: true, missing: [], unused: [], excluded: [], untracked: [], deleted: [] },
+  })
+  assert.match(listedClean, /git reports no changed path that the list above omits/)
 
   // A not-checked audit gets the matching no-list sentence too.
   const notChecked = buildReviewPrompt({
