@@ -694,6 +694,36 @@ test('a TRUNCATED per-file digest map that names no moved file is unknown, not f
     assert.equal(stale.state, 'stale')
     assert.equal(stale.staleKind, 'unknown')
     assert.equal(stale.staleKindCause, 'declared-set')
+
+    // AND THE DANGEROUS SHAPE: a truncated map whose ONLY persisted file is a document that
+    // moved. One of the digests that was not persisted may have moved too, so "documents only"
+    // is not provable and the answer must stay unknown. (Independent review round 1 found this
+    // arm answering `docs`, which would have advised skipping a re-review of code.)
+    const truncatedWithMovedDoc = {
+      features: [
+        reviewedFeature(dir, files, {
+          file_digests: { 'docs/notes.md': full.digests['docs/notes.md'] },
+          file_digests_total: 2,
+          file_digests_truncated: true,
+        }),
+      ],
+    }
+    writeFileSync(join(dir, 'docs/notes.md'), 'three\n', 'utf8')
+    const movedDoc = reviewFreshness(dir, undefined, truncatedWithMovedDoc)
+    assert.equal(movedDoc.state, 'stale')
+    assert.equal(movedDoc.staleKind, 'unknown', 'a truncated map may hide the code change')
+    // A moved CODE file is still code, truncated map or not: that half is sound in both directions.
+    const truncatedWithMovedCode = {
+      features: [
+        reviewedFeature(dir, files, {
+          file_digests: { 'lib/x.js': full.digests['lib/x.js'] },
+          file_digests_total: 2,
+          file_digests_truncated: true,
+        }),
+      ],
+    }
+    writeFileSync(join(dir, 'lib/x.js'), 'let x = 2\n', 'utf8')
+    assert.equal(reviewFreshness(dir, undefined, truncatedWithMovedCode).staleKind, 'code')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -727,6 +757,29 @@ test('a restored deletion is judged by the restored path, not by the empty file 
     assert.equal(stale.cause, 'deletion-restored')
     assert.equal(stale.staleKind, 'code')
     assert.equal(stale.staleKindCause, 'deletions')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the judged next action never claims a code change it could not establish', async () => {
+  const dir = projectWithFiles({ 'lib/x.js': 'let x = 1\n', 'docs/notes.md': 'one\n' })
+  try {
+    const features = { features: [reviewedFeature(dir, ['lib/x.js', 'docs/notes.md'])] }
+    writeFileSync(join(dir, FEATURES_RELATIVE_PATH), JSON.stringify(features, null, 2), 'utf8')
+    writeFileSync(join(dir, 'docs/notes.md'), 'two\n', 'utf8')
+    const status = await buildToolDefinition({ config: resolveConfig({}), ctx: null, services: null }).execute(
+      {},
+      execFor(dir),
+    )
+    assert.deepEqual(status.reviewFreshness.staleKinds, { code: [], docs: [], unknown: ['F001'] })
+    // THE UNKNOWN BUCKET IS COUNTED AS OWED, BUT NOT DESCRIBED AS A CODE CHANGE: the same report
+    // says those changed files could not be told apart, and the next-action sentence must not
+    // contradict it (independent review round 1 found it saying "whose code changed").
+    const next = status.handoffDoc.nextAction
+    assert.match(next, /could not be told apart/)
+    assert.doesNotMatch(next, /whose code changed/)
+    assert.match(renderStatus(status), /1 unclassified \(changed files could not be told apart: F001/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -809,6 +862,13 @@ test('the reviewer findings survive the session in the evidence row and in statu
     )
     assert.equal(row.issues[1].reachable, true)
     assert.equal(row.issues[1].title, 'A minor thing.')
+    // THE WRITER, NOT ONLY THE READER. The first version of this change persisted no per-file
+    // digests at all (the reader and its tests existed; no production call was ever added), so a
+    // mixed declared set was always judged `unknown`. Independent review round 1 found it by
+    // driving this exact path.
+    assert.equal(typeof row.file_digests?.['a.js'], 'string', 'the per-file digest is persisted')
+    assert.equal(row.file_digests_total, 1)
+    assert.equal(row.file_digests_truncated, undefined, 'a one-file review is not truncated')
 
     const status = await buildToolDefinition(options).execute({}, execFor(dir))
     const text = renderStatus(status)
@@ -832,6 +892,14 @@ test('a review row written before findings were persisted renders no findings li
     // BACKWARD COMPATIBILITY: an absent `issues` field is "not recorded", not "none found", so
     // the report of an old project is byte-identical to what it was before this feature.
     assert.doesNotMatch(renderStatus(status), /findings:/)
+
+    // AND A CURRENT ROW THAT RECORDED NO FINDINGS RENDERS NOTHING EITHER. The writer always emits
+    // `issues: []` now, so a "the reviewer recorded no finding" line per clean review would bury
+    // the features that do have findings (independent review round 1 found exactly that line).
+    const clean = reviewedFeature(dir, ['a.js'], { issues: [] })
+    writeFileSync(join(dir, FEATURES_RELATIVE_PATH), JSON.stringify({ features: [clean] }, null, 2), 'utf8')
+    const cleanStatus = await buildToolDefinition(options).execute({}, execFor(dir))
+    assert.doesNotMatch(renderStatus(cleanStatus), /findings:/)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

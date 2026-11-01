@@ -336,8 +336,10 @@ in `test/mutation-verdict.test.mjs`.
 **What still needs a human.** The end-to-end proof that a real browser run still catches the mutants
 cannot be produced in the sandbox. The three harnesses are **NOT RUN in-sandbox after this change**
 and must be run in a normal terminal with a Chromium-family browser; their caught/missed counts are
-unmeasured until then. The other six harnesses run in-sandbox through the file-backed child capture —
-the sixth is `mutation-check-isolation.mjs`, added 2026-11-01 for the review fence.
+unmeasured until then. The other harnesses run in-sandbox through the file-backed child capture —
+including `mutation-check-isolation.mjs` (added 2026-11-01 for the review fence) and
+`mutation-check-state.mjs` (added 2026-11-01 for the recorded state: findings, per-file digests and
+the judged staleness).
 
 ### Reviewer step 4 used to compare with a list that could be absent — **FIXED**
 When `workflow_review` was called with no `changed_files`, `buildReviewPrompt` omitted the "Files the

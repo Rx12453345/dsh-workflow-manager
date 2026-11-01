@@ -215,6 +215,7 @@ node tooling/mutation-check-project-tab.mjs   # the conversation tab
 node tooling/mutation-check-work-unit.mjs     # work-unit state
 node tooling/mutation-check-verification.mjs  # the verification-depth policy
 node tooling/mutation-check-governance.mjs    # HANDOFF governance, the waiver, the docs fast lane
+node tooling/mutation-check-state.mjs         # the recorded state: findings, per-file digests, judged staleness
 ```
 
 Each mutant: inject a defect → run the suite → record whether it went red → **restore the source

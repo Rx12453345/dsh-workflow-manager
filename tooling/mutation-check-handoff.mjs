@@ -101,6 +101,20 @@ const MUTANTS = [
     replace: "          .map(value => value || '(no id)')\n",
     expect: /forge|waiver line/,
   },
+  // ---- the 0.4.0 refresh: the brief is rewritten on later state writes ----------------------
+  //
+  // The other half of that change — bounded findings, per-file digest evidence, the truncated-map
+  // guard and the judged next action — is covered by `tooling/mutation-check-state.mjs`, which runs
+  // the suites those rules live in. Measured here first: H9, H10, H11 and H13 all SURVIVED a harness
+  // that only runs `test/handoff.test.mjs`, which is why they moved to a harness that can see them.
+  {
+    id: 'H12',
+    what: 'the refresh reports "absent" for a path that exists but is not a file, so a failed write is swallowed',
+    file: 'lib/advance.js',
+    find: '    if (status.present !== true) {\n',
+    replace: '    if (true) {\n',
+    expect: /failed|could not be refreshed|refresh/,
+  },
 ]
 
 function run() {

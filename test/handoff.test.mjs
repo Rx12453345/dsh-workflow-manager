@@ -800,11 +800,31 @@ test('a failed brief write is reported on the move, never turned into a refused 
 // property that makes it cheap: it must never appear in a recorded review's `changed_files`.
 // Staleness is caused by the FINGERPRINT, which covers only declared files, so declaring the
 // document would stale every feature the moment the document was written — the exact trap the
-// document exists to avoid. This asserts the property over the repository's own evidence.
+// document exists to avoid.
+//
+// THE CHECK MUST NOT BE VACUOUS IN A FRESH CLONE. `.dsh/` is gitignored, so a clone has no
+// evidence to scan — the first version of this test simply returned and reported PASS, which
+// independent review round 1 correctly called out. The rule is therefore asserted where it is
+// always present (CONTRIBUTING.md documents it, and the document itself is tracked), and the
+// data scan runs in addition whenever this checkout has workflow state.
 
-test('no recorded review declares docs/HANDOFF-STATE.md (C002)', () => {
+test('the session-end document is documented as never reviewed (C002)', () => {
+  const contributing = readFileSync(new URL('../CONTRIBUTING.md', import.meta.url), 'utf8')
+  assert.match(contributing, /docs\/HANDOFF-STATE\.md/, 'CONTRIBUTING must name the document')
+  assert.match(contributing, /C002/, 'CONTRIBUTING must name the constraint that pins it')
+  assert.match(contributing, /never\*\* declared in a review/, 'the rule itself must be stated')
+  // The document is tracked, so its absence is a real failure here (not a missing-state skip).
+  assert.equal(
+    existsSync(new URL('../docs/HANDOFF-STATE.md', import.meta.url)),
+    true,
+    'docs/HANDOFF-STATE.md must exist: it is the tracked session-end document',
+  )
+})
+
+test('no recorded review declares docs/HANDOFF-STATE.md (C002, data check)', () => {
   const featuresPath = new URL('../.dsh/FEATURES.json', import.meta.url)
-  // A checkout without workflow state has nothing to assert; the rule is about recorded evidence.
+  // A checkout without workflow state has no recorded evidence to scan; C002 is asserted by the
+  // test above, so this one is additive rather than the only check.
   if (!existsSync(featuresPath)) return
   const document = JSON.parse(readFileSync(featuresPath, 'utf8'))
   const declared = []
@@ -820,4 +840,61 @@ test('no recorded review declares docs/HANDOFF-STATE.md (C002)', () => {
     'the session-end state document must never be declared in a review: declaring it would stale ' +
       'every feature whose review covered it',
   )
+})
+
+test('a failed refresh is reported on the record-review reply, not swallowed', async () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'let a = 1\n', 'utf8')
+    writeFileSync(join(dir, 'b.js'), 'let b = 1\n', 'utf8')
+    seedProject(
+      dir,
+      [feature('F001', { passes: true, evidence: [reviewRow(dir, ['a.js'])] }), feature('F002')],
+      { phase: 'COMMIT' },
+    )
+    const options = toolOptions()
+    const def = buildAdvanceToolDefinition(options)
+    const entered = await def.execute(
+      { action: 'advance', to: 'HANDOFF', waive_open_features: true, waiver_reason: 'deliberately unfinished' },
+      execFor(dir),
+    )
+    assert.equal(entered.ok, true, JSON.stringify(entered))
+
+    // The portable way to make the write fail: a DIRECTORY where the brief belongs.
+    rmSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), { force: true })
+    mkdirSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), { recursive: true })
+
+    const { reviewDef, reviewExec } = reviewRig(options, execFor(dir))
+    await reviewDef.execute({ feature: 'b', changed_files: ['b.js'] }, reviewExec)
+    const applied = await def.execute({ action: 'record-review', feature_id: 'F002' }, execFor(dir))
+    assert.equal(applied.ok, true, 'the verdict is recorded whatever the document does')
+    // A SILENT FAILURE LEAVES A STALE BRIEF ON DISK, which is the defect the refresh exists to
+    // remove — so the failure is on the reply (independent review round 1 found it dropped).
+    assert.equal(applied.handoffDoc?.status, 'failed', JSON.stringify(applied))
+    assert.match(String(applied.handoffDoc?.reason ?? ''), /could not be refreshed/)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('boot refreshes an existing brief too, so "every state write" is literal', async () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'let a = 1\n', 'utf8')
+    seedProject(dir, [feature('F001', { passes: true, evidence: [reviewRow(dir, ['a.js'])] })], { phase: 'COMMIT' })
+    const def = buildAdvanceToolDefinition(toolOptions())
+    const entered = await def.execute({ action: 'advance', to: 'HANDOFF' }, execFor(dir))
+    assert.equal(entered.ok, true, JSON.stringify(entered))
+    const before = readFileSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), 'utf8')
+
+    // `boot` also writes WORKFLOW.json. Independent review round 1 observed that it left the
+    // brief behind, which made the documented "every later state write refreshes it" false.
+    const booted = await def.execute({ action: 'boot', smoke_passed: true }, execFor(dir))
+    assert.equal(booted.status, 'ok', JSON.stringify(booted))
+    assert.equal(booted.handoffDoc?.status, 'written', 'boot must refresh the brief')
+    const after = readFileSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), 'utf8')
+    assert.notEqual(after, before, 'the refreshed brief carries the new state stamp')
+  } finally {
+    cleanup(dir)
+  }
 })

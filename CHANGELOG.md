@@ -20,7 +20,7 @@ live until it has been synced and DSH restarted.
 
 ---
 
-## [Unreleased] — 2026-11-02 (0.4.0)
+## [Unreleased] — 2026-11-01 (0.4.0)
 
 ### Changed — the recorded state survives a context reset, and judges staleness
 
@@ -36,11 +36,12 @@ but not the reason for it.
   written before this has no `issues` field and reads as "not recorded", never as "nothing found".
 - **Staleness is judged, not just announced.** "re-review 6 stale feature(s)" was wrong advice: most
   of those records were stale because a document inside their declared set had been edited, and
-  chasing all six cost hours. `reviewFreshness` now records per-file digests, and the status line and
-  the brief say which stale records owe a review (`code changed`) and which are cosmetic
-  (`documents only`); a mixed set with no per-file evidence answers `unknown` rather than guessing.
-  The classification is the project's own (`verification.sources`/`security`/`ui`/`nonExecutable`),
-  not a second extension list.
+  chasing all six cost hours. The review evidence now records a bounded per-file digest map, and
+  `reviewFreshness` compares it to name the reviewed file that actually moved, so the status line and
+  the brief separate `code changed` (a re-review is owed) from `documents only` (cosmetic); a mixed
+  set with no per-file evidence answers `unknown` rather than guessing, and a truncated map never
+  reports "documents only". The classification is the project's own
+  (`verification.sources`/`security`/`ui`/`nonExecutable`), not a second extension list.
 - **The brief no longer freezes at HANDOFF.** It was written only when the project entered `HANDOFF`,
   which is terminal, so every later `record-review` left the file describing a past state (it said
   7/8 complete and six stale while the state said 8/8 and five). Every state write now refreshes it —
