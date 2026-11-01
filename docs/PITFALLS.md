@@ -278,6 +278,37 @@ condition rather than the mere presence of a string (which passes for `if (false
 throws, so traversal must return "unreadable"; testing only "a getter throws" does not reproduce it, because
 `stringifySafely` returns early. **VERIFIED.** `NEXT-STEPS.md:1514–1518, 1553–1557`.
 
+### A fallback that only REPORTS itself is still a pass
+The review fence hashed file contents while a 64 MiB budget lasted and fell back to size+mtime beyond it,
+recording `contentHashed: false` in the report. That looked honest and was not: the fallback branch had no
+`continue`/report path of its own, so for a file with **no digest on either side** and an unchanged size the
+comparison fell off the end and nothing was recorded at all — a **same-length rewrite of an unhashed file
+left `clean: true`**, measured by an independent security review with a 65 MiB fixture that kept its
+tampered bytes. The reporting was the tell: a limit that only describes itself is not a limit.
+
+Fix: the budget equals the snapshot's copy cap (hashing is cheaper than the copy the fence already makes),
+so every accepted project is fully hashed; a file with no digest lands in `touched` (timestamp moved) or
+`unverified` (nothing to compare), and **both are part of the clean predicate**. The same review found the
+other half: `.git/index` is content-hashed, and the reviewer prompt tells the reviewer to run `git status`,
+which rewrites it — a false CONTAMINATED against a review that changed nothing (a human's concurrent push
+did the same thing through `.git/logs`). Git's own bookkeeping is now compared by existence and kind only.
+**VERIFIED** by the cases in `test/review-isolation.test.mjs`.
+
+### A name list is not a classifier
+`SHELL_TOOLS` enumerated the shell tools the plugin knew (`bash`, `pwsh`, `exec`, …). The host then moved
+its shell to `ops_bash`, supplied by an ops plugin, and a plain `ops_bash{command: "del /f /s /q …"}`
+classified **`null` — deferred, i.e. no review at all**; 16 of 16 destructive commands tried were missed.
+The same defect one level down: destinations were recognised only by enumerated argument keys, so
+`{script_path: "C:/Windows/x.sh"}` never produced the "outside the project" escalation, and the review
+layer disappeared exactly on the destinations it exists for.
+
+Fix: classify by **shape** — the name looks like a shell, or the call carries a program body under a
+command key (excluding `query`, which is text to search for, not a program); a string value that is an
+absolute path is a destination whatever its key is called; `cwd`/`workdir` are working directories with
+their own reason, not destinations. The name list stays as a fast path; the shape rules are what keep the
+gate alive when the host repackages its tools. Three mutants in `tooling/mutation-check-approval.mjs` pin
+the new rules. **VERIFIED.**
+
 ---
 
 ## 6. Lenient date parsing
@@ -370,7 +401,8 @@ never compared bytes; it also exited 0 when an anchor failed or a mutant survive
 compared with the original **Buffer**, anchor matching folds `\r\n`, and `missed.length > 0` or
 `caught !== MUTANTS.length` exits 1. `tooling/mutation-check-lock-probe.mjs` is still a one-shot probe,
 not one of the official harnesses, and is **not wired into the lock**. **VERIFIED** for the approval
-harness (`sources restored byte-for-byte: YES`, 65/65 active mutants; M32 was removed because the writer
+harness (`sources restored byte-for-byte: YES`, every active mutant caught — the count is not restated
+here because it moves with each added mutant; M32 was removed because the writer
 now refuses the unreadable-file path it exercised); the lock-probe caveat remains.
 `NEXT-STEPS.md:2885–2886, 3031–3035`.
 
@@ -577,7 +609,7 @@ like exfiltration stays **high** and is refused monotonically, and `decideStreng
 byte — only the classification moves from medium to low, leaving thresholds, strength and `denyHighAlways`
 intact. `selfDeployAuthorised` increments **only on a real release**, an `info` line names the anchor, and an
 unresolvable anchor logs **DISABLED** rather than widening the range. `workflow_status` does **not** render
-that counter, since it lives in `lib/tools.js`, outside that round. **VERIFIED** offline — the harness is now 65/65 active mutants and
+that counter, since it lives in `lib/tools.js`, outside that round. **VERIFIED** offline — the harness catches every active mutant and
 review round 1 PASS 8.71 with 0 unexplained differences. `NEXT-STEPS.md:2508–2605, 2762–2798`.
 
 ### What the exemption still refuses, and why that is structural

@@ -35,13 +35,17 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
+  renameSync,
   rmSync,
   rmdirSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 
 import { DEFAULT_DIMENSIONS, renderIsolation, runReview } from '../lib/review.js'
@@ -171,16 +175,37 @@ function countLinks(dir) {
   const walk = absolute => {
     for (const entry of readdirSync(absolute, { withFileTypes: true })) {
       const child = join(absolute, entry.name)
-      const stat = lstatSync(child)
-      if (stat.isSymbolicLink()) {
+      // THE HELPER MUST SEE WHAT THE GUARD SEES. `lstatSync(child).isSymbolicLink()` reports a
+      // Windows junction as FALSE (measured), so an lstat-only counter returned zero for a copy
+      // that really did contain one — a test weaker than the guard it was supposed to check.
+      // The Dirent of the parent listing IS true for it, and the native realpath settles the
+      // rest (an ordinary directory resolves to its own name).
+      if (entry.isSymbolicLink() || resolvesElsewhere(absolute, entry.name, child)) {
         links += 1
         continue
       }
-      if (stat.isDirectory()) walk(child)
+      if (statSync(child).isDirectory()) walk(child)
     }
   }
   walk(dir)
   return links
+}
+
+/** Whether a path exists under its own name in its parent, i.e. it is not a redirect. */
+function resolvesElsewhere(parent, name, child) {
+  try {
+    return !samePath(realpathSync.native(child), join(realpathSync.native(parent), name))
+  } catch {
+    // Unresolvable: count it as a link, like the module's own guard does.
+    return true
+  }
+}
+
+/** Case-insensitive equality on Windows, exact elsewhere. */
+function samePath(a, b) {
+  const left = resolve(a)
+  const right = resolve(b)
+  return process.platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right
 }
 
 /** A throwaway directory outside any project, registered for cleanup. */
@@ -762,4 +787,214 @@ test('a snapshot directory is only created under the OS temp directory', t => {
     false,
     'the copy never contains the project',
   )
+})
+
+// ---------------------------------------------------------------------------
+// the clean predicate cannot be fooled (2026-10-25 security review)
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT THESE PIN: the fence compared files by content hash only while a 64 MiB budget
+// lasted and silently fell through to "nothing to report" for the rest. A same-length rewrite
+// of an unhashed file therefore left `clean: true` and the tampered bytes in the project —
+// reproduced by the review with a 65 MiB fixture. This project had 533 of 999 entries unhashed,
+// including `.dsh/FEATURES.json` and `.github/workflows/ci.yml`.
+
+test('the link counter used by these tests can see a junction', t => {
+  const dir = makeHolder(t, 'wf-iso-links-')
+  const target = makeHolder(t, 'wf-iso-links-target-')
+  writeFileSync(join(target, 'x.txt'), 'x\n')
+  symlinkSync(target, join(dir, 'link'), 'junction')
+  assert.equal(countLinks(dir), 1, 'a junction must be counted; lstat alone reports it as a directory')
+  assert.equal(countLinks(target), 0, 'an ordinary directory is not a link')
+})
+
+test('a same-length rewrite cannot pass when the fence took no digest', t => {
+  const project = makeProject(t)
+  // A LOWERED BUDGET IS THE OLD DEFAULT'S BEHAVIOUR, kept reachable on purpose: it is the state
+  // in which files have no digest, and the state the review proved could pass while tampered.
+  const snapshot = createReviewSnapshot(project, { hashBudget: 0 })
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+  assert.equal(snapshot.contentHashed, false, 'the fixture must really have unhashed files')
+  // A LOWERED BUDGET CANNOT PRODUCE A CLEAN VERDICT AT ALL, and that is the fail-closed answer:
+  // the fence had no digest for these files, so "unchanged" is not something it can certify.
+  const untouched = verifyReviewSnapshot(snapshot)
+  assert.equal(untouched.clean, false)
+  assert.ok(untouched.unverified.length > 0, 'the files without a digest are named as unverifiable')
+
+  const file = join(project, 'package.json')
+  const original = readFileSync(file)
+  const tampered = Buffer.from(original)
+  tampered[tampered.length - 3] = tampered[tampered.length - 3] === 0x39 ? 0x38 : 0x39 // same length
+  writeFileSync(file, tampered)
+  const stamp = new Date(Date.now() + 5000)
+  utimesSync(file, stamp, stamp)
+
+  const fence = verifyReviewSnapshot(snapshot)
+  assert.equal(fence.clean, false, 'a file the fence could not hash must not certify the project')
+  assert.ok(fence.touched.includes('package.json'), 'the file is reported as possibly changed')
+  assert.deepEqual(fence.modified, [], 'there is no digest, so it cannot be called modified')
+})
+
+test('a file with no digest whose timestamp moved cannot pass on that basis alone', t => {
+  // THE PREDICATE HAS TWO DOUBT BUCKETS AND EACH NEEDS ITS OWN CASE. In the fixture above the
+  // unchanged files land in `unverified`, so dropping `touched` from the clean predicate would
+  // still be refused by the other bucket. This project has ONE file, and it is the one whose
+  // timestamp moved: `unverified` is empty and only `touched` can refuse the pass.
+  const dir = mkdtempSync(join(tmpdir(), 'wf-iso-one-'))
+  t.after(() => {
+    try {
+      rmSync(dir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+  writeFileSync(join(dir, 'only.txt'), 'abcdef\n')
+  const snapshot = createReviewSnapshot(dir, { hashBudget: 0 })
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+
+  writeFileSync(join(dir, 'only.txt'), 'abcdeF\n') // same length, different byte
+  const stamp = new Date(Date.now() + 5000)
+  utimesSync(join(dir, 'only.txt'), stamp, stamp)
+
+  const fence = verifyReviewSnapshot(snapshot)
+  assert.deepEqual(fence.unverified, [], 'no file is in the "nothing was compared" bucket')
+  assert.deepEqual(fence.touched, ['only.txt'])
+  assert.equal(fence.clean, false, 'a file that may have changed must not certify the project')
+})
+
+test('with the default budget a same-length rewrite is a MODIFICATION, not a doubt', t => {
+  const project = makeProject(t)
+  const snapshot = createReviewSnapshot(project)
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+  // THE DEFAULT MUST COVER EVERY SNAPSHOT THE FENCE ACCEPTS: hashing is cheaper than the copy
+  // this module already makes, so no accepted project may fall back to size+mtime.
+  assert.equal(snapshot.contentHashed, true, 'every accepted snapshot is fully content-hashed')
+
+  const file = join(project, 'package.json')
+  const tampered = Buffer.from(readFileSync(file))
+  tampered[tampered.length - 3] = tampered[tampered.length - 3] === 0x39 ? 0x38 : 0x39
+  writeFileSync(file, tampered)
+
+  const fence = verifyReviewSnapshot(snapshot)
+  assert.equal(fence.clean, false)
+  assert.ok(fence.modified.includes('package.json'))
+})
+
+test("git's own bookkeeping is not evidence a reviewer touched the project", t => {
+  const project = makeProject(t)
+  writeFileSync(join(project, '.git', 'index'), 'DIRC-v1\n')
+  // The reflog file exists BEFORE the snapshot, as it does in any real repository: a push
+  // APPENDS to it. A NEW reflog path is still an addition and still fails the fence below.
+  mkdirSync(join(project, '.git', 'logs', 'refs', 'remotes', 'origin'), { recursive: true })
+  writeFileSync(join(project, '.git', 'logs', 'refs', 'remotes', 'origin', 'main'), 'old\n')
+  const snapshot = createReviewSnapshot(project)
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+
+  // EXACTLY WHAT `git status --porcelain` DOES — the step-4 instruction in the reviewer prompt —
+  // and what a human's concurrent `git push` does to the reflog. Both used to read as
+  // CONTAMINATED against a review that changed nothing.
+  writeFileSync(join(project, '.git', 'index'), 'DIRC-v2 with refreshed stat data\n')
+  writeFileSync(join(project, '.git', 'logs', 'refs', 'remotes', 'origin', 'main'), 'old\npush\n')
+
+  const fence = verifyReviewSnapshot(snapshot)
+  assert.equal(
+    fence.clean,
+    true,
+    `the index refresh must not contaminate: modified=${fence.modified.join(',')} added=${fence.added.join(',')}`,
+  )
+
+  // STRUCTURAL DAMAGE IS STILL DAMAGE. Removing the index is a deletion and is restored.
+  rmSync(join(project, '.git', 'index'))
+  const deleted = verifyReviewSnapshot(snapshot)
+  assert.equal(deleted.clean, false)
+  assert.ok(deleted.deleted.includes('.git/index'))
+  assert.ok(deleted.restored.includes('.git/index'), 'the index is restored from the snapshot')
+})
+
+test('a restore refuses to write through a junction planted in the project', t => {
+  const project = makeProject(t)
+  const snapshot = createReviewSnapshot(project)
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+
+  // The reviewer deletes `src` and leaves a junction in its place, pointing INSIDE the project
+  // so the scan itself has no reason to refuse. A restore through it would write `src/a.js`
+  // into `.git/a.js` — a corrupted tree, reported as "restored".
+  rmSync(join(project, 'src'), { recursive: true, force: true })
+  symlinkSync(join(project, '.git'), join(project, 'src'), 'junction')
+
+  const fence = verifyReviewSnapshot(snapshot)
+  assert.equal(fence.clean, false)
+  assert.ok(
+    fence.restoreErrors.some(entry => entry.includes('src/a.js') && entry.includes('link')),
+    `the restore must name the link: ${fence.restoreErrors.join(' | ')}`,
+  )
+  assert.equal(existsSync(join(project, '.git', 'a.js')), false, 'nothing was written through the junction')
+})
+
+test('a project root swapped for a junction is not restored through', t => {
+  const project = makeProject(t)
+  const snapshot = createReviewSnapshot(project)
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  const holder = makeHolder(t, 'wf-iso-rootswap-')
+  const aside = `${project}-aside`
+  renameSync(project, aside)
+  symlinkSync(holder, project, 'junction')
+  t.after(() => {
+    try {
+      rmdirSync(project)
+    } catch {
+      // already gone
+    }
+    try {
+      rmSync(aside, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+
+  const fence = verifyReviewSnapshot(snapshot)
+  assert.equal(fence.clean, false)
+  assert.equal(fence.rootSwapped, true, 'the fence must name the root swap, not report a plain deletion')
+  assert.deepEqual(fence.restored, [], 'nothing is restored into a directory that is no longer the project')
+  assert.deepEqual(readdirSync(holder), [], 'nothing was written through the swapped root')
 })

@@ -20,6 +20,55 @@ live until it has been synced and DSH restarted.
 
 ---
 
+## [Unreleased] — 2026-11-01
+
+### Fixed — the review fence could pass a project it had never content-hashed
+
+`lib/review-sandbox.js` compared files by content digest only while a 64 MiB budget lasted, and the
+residue was compared by size and timestamp. A file that had no digest and whose size did not change
+fell through the comparison entirely, so a **same-length rewrite of an unhashed file left the fence
+reporting `clean: true`** and the changed bytes in the project (reproduced by the security review with
+a 65 MiB fixture). On this repository that covered hundreds of entries, including `.dsh/FEATURES.json`
+and `.github/workflows/ci.yml`.
+
+The budget is now the snapshot's own copy cap: hashing is cheaper than the copy the fence already
+makes, so **every project the snapshot accepts is fully content-hashed**, and a deliberately lowered
+budget cannot come back clean at all. Files without a digest are reported for what they are — no longer
+`"is unchanged"` — and "possibly changed" / "unverifiable" are part of the clean predicate instead of
+being printed after a PASS.
+
+Two related guards, from the same review:
+
+- **Git's own bookkeeping is compared structurally, not by content.** The reviewer prompt tells the
+  reviewer to run `git status`, which rewrites `.git/index`; a human's concurrent push appends reflogs
+  and rewrites remote-tracking refs. A file's content change in the index/reflog/remote-tracking/lock
+  paths is no longer contamination, while a deletion, an addition or a kind change there still is.
+- **The restore side now has the delete side's link guard.** A restore used to write through any
+  directory in the project; a junction planted where a deleted directory had been received the bytes
+  instead. Ancestors are checked (native realpath, contained in the project, not a reparse point), and a
+  project root that has been swapped for a junction is reported as `rootSwapped` with nothing restored.
+
+Ten cases were added to `test/review-isolation.test.mjs`; the test helper that counts links was itself
+weaker than the guard (it used `lstat`, which reports a Windows junction as a directory) and now uses
+the parent `Dirent` plus the native realpath.
+
+### Fixed — the approval gate classified the host's shell tool as "unknown"
+
+The host moved its shell tool to `ops_bash`, supplied by an ops plugin rather than by DSH core, and
+`SHELL_TOOLS` is a fixed name list: a plain `ops_bash{command: …}` classified `null` — deferred, i.e.
+**no review at all** — and 16 of 16 destructive commands tried against it were missed. Destinations had
+the same hole a level down: they were recognised only by an enumerated key, so
+`ops_bash{script_path: "C:/Windows/x.sh"}` never produced the "outside the project" escalation.
+
+Classification is now by **shape**: a tool whose name looks like a shell, or a call that carries a
+program body under a command key, is `medium` (the name list is kept as a fast path); a string value
+that is an absolute path is a destination whatever its key is called; and `cwd`/`workdir` are judged as
+working directories with their own reason instead of being counted as destinations. Exemptions,
+exfiltration precedence, the unknown-tool default (`null` = defer) and the self-deployment exemption are
+unchanged, and three mutants were added to `tooling/mutation-check-approval.mjs` for the new rules.
+
+---
+
 ## [Unreleased] — 2026-10-25
 
 ### Changed — the checkout is version 0.3.0

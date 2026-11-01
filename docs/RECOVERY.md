@@ -127,10 +127,14 @@ about its central premise. These are the corrections, with how they were establi
 - **The transactional review guard** (`c0cdc5c`, `lib/review-sandbox.js`): before a reviewer starts,
   the project is snapshotted into an isolated temp root as a real copy; the reviewer is pointed at
   that copy; when the child finishes the real project is re-scanned, deletions are restored
-  byte-for-byte, modifications and additions are reported, and any difference makes the review
-  **contaminated** — it cannot pass at any score. The copy is deleted only through guards a junction
-  cannot satisfy (native realpath containment, a pre-delete link scan, a snapshot marker, a canary
-  outside the copy), and no reviewer starts if a snapshot cannot be built. The cases in
+  byte-for-byte, modifications and additions are reported, and any content difference or relative path
+  appearing/disappearing makes the review **contaminated** — it cannot pass at any score. Git's own
+  bookkeeping (index, reflogs, remote-tracking refs, lock files) is compared by existence and kind
+  only, because a read-only `git status` — which the reviewer is told to run — rewrites the index and
+  a concurrent push appends the reflog (both were once reported as contamination against reviews that
+  changed nothing). The copy is deleted only through guards a junction cannot satisfy (native realpath
+  containment, a pre-delete link scan, a snapshot marker, a canary outside the copy), the restore is
+  never written through a link, and no reviewer starts if a snapshot cannot be built. The cases in
   `test/review-isolation.test.mjs` include an incident replay that deletes the project through a
   junction and requires every byte back.
 - **Version:** read it from `package.json`; this document does not restate it, because it moves.

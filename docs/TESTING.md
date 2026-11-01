@@ -205,6 +205,7 @@ Runs in minutes. It answers the only question layer 1 cannot: **do the tests act
 ```powershell
 node tooling/mutation-check.mjs               # constraint ledger / retirement
 node tooling/mutation-check-approval.mjs      # approval gate + self-deployment exemption
+node tooling/mutation-check-isolation.mjs     # the review fence: clean predicate, restore guards
 node tooling/mutation-check-client.mjs        # the settings page
 node tooling/mutation-check-panel.mjs         # the sidebar panel
 node tooling/mutation-check-project-tab.mjs   # the conversation tab

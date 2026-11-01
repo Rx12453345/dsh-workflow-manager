@@ -760,6 +760,33 @@ const MUTANTS = [
     suite: 'unit',
     expect: /value=llm-only|downgrade command/,
   },
+  {
+    id: 'M67',
+    what: 'a call is only a shell transport when its NAME says so, so an unknown shell tool carrying a program defers',
+    file: 'lib/approval.js',
+    find: `  if (shellName || programBody.length > 0) {`,
+    replace: `  if (shellName) {`,
+    suite: 'unit',
+    expect: /program body|carries a program/,
+  },
+  {
+    id: 'M68',
+    what: 'a destination is only recognised by its key name, so an absolute path under an unknown key defers',
+    file: 'lib/approval.js',
+    find: `      if (DESTINATION_KEYS.has(lowered) || ABSOLUTE_PATH_SHAPE.test(value)) {`,
+    replace: `      if (DESTINATION_KEYS.has(lowered)) {`,
+    suite: 'unit',
+    expect: /outside the project|SHAPE/i,
+  },
+  {
+    id: 'M69',
+    what: 'a working directory is judged as a destination, losing the reason that names the working directory',
+    file: 'lib/approval.js',
+    find: `      if (WORKING_DIRECTORY_KEYS.has(lowered)) {`,
+    replace: `      if (false) {`,
+    suite: 'unit',
+    expect: /working directory outside the project/,
+  },
 ]
 
 function run(suite) {
