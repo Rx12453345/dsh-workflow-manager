@@ -1862,3 +1862,73 @@ test('the features file is written atomically enough to be re-read', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+// ---------------------------------------------------------------------------
+// the two report-accuracy findings of review round 2
+// ---------------------------------------------------------------------------
+
+test('the findings cap counts findings, not clean reviews', async () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'let x = 1\n', 'utf8')
+    const row = (overrides) => ({ ...reviewedFeature(dir, ['a.js']).evidence[0], ...overrides })
+    const features = []
+    // Ten CLEAN reviews (`issues: []`, which record-review always writes now) …
+    for (let index = 1; index <= 10; index += 1) {
+      features.push(feature(`F${String(index).padStart(3, '0')}`, 1, { passes: true, evidence: [row({ issues: [] })] }))
+    }
+    // … and one real finding, deliberately LAST so counting the clean rows would push it out of
+    // the 8-feature window and print a false "hidden findings" line.
+    features.push(
+      feature('F011', 1, {
+        passes: true,
+        evidence: [
+          row({
+            issues: [{ dimension: 'correctness', severity: 'minor', reachable: false, title: 'A real finding.' }],
+          }),
+        ],
+      }),
+    )
+    writeFileSync(join(dir, FEATURES_RELATIVE_PATH), JSON.stringify({ features }, null, 2), 'utf8')
+    const status = await buildToolDefinition({ config: resolveConfig({}), ctx: null, services: null }).execute(
+      {},
+      execFor(dir),
+    )
+    assert.equal(status.features.findingsTotal, 1, 'a clean review is not a feature with findings')
+    assert.equal(status.features.findingsTruncated, false)
+    const text = renderStatus(status)
+    assert.match(text, /findings: F011 — 1 recorded finding\(s\)/)
+    assert.doesNotMatch(text, /more feature\(s\) with recorded findings/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the advance surface judges staleness with the project classification, like status', async () => {
+  const dir = projectWithFiles({ 'notes/data.json': '{"a":1}\n' })
+  try {
+    // `verification.nonExecutable` is the project saying this tree is data, so a changed file in
+    // it is documentation-class. Passing no classification to the advance surface made it answer
+    // "code changed" for the same record status called "documents only" (review round 2).
+    writeFileSync(
+      join(dir, '.dsh', 'workflow.yml'),
+      'tier: standard\nverification:\n  policy: advisory\n  nonExecutable:\n    - notes\n',
+      'utf8',
+    )
+    const features = { features: [reviewedFeature(dir, ['notes/data.json'])] }
+    writeFileSync(join(dir, FEATURES_RELATIVE_PATH), JSON.stringify(features, null, 2), 'utf8')
+    writeFileSync(join(dir, 'notes/data.json'), '{"a":2}\n', 'utf8')
+
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const status = await buildToolDefinition(options).execute({}, execFor(dir))
+    const advance = await buildAdvanceToolDefinition(options).execute({ action: 'status' }, execFor(dir))
+    assert.deepEqual(status.reviewFreshness.staleKinds, { code: [], docs: ['F001'], unknown: [] })
+    assert.deepEqual(
+      advance.reviewFreshness.staleKinds,
+      status.reviewFreshness.staleKinds,
+      'the two surfaces must not disagree about the same stale record',
+    )
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

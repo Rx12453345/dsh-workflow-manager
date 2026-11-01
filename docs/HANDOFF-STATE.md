@@ -43,24 +43,30 @@ verdict but not the reason for it**:
 All eight features are complete with an independent review behind each: the P0 review-isolation
 fence, the P1 shape-classified approval gate, the four P3 items (EOL-aware fingerprint, governance
 mutant, code minors, handoff dogfood, documentation caveats), the UI harness, and the recovery
-baseline. **This session's change (0.4.0) has an independent review of its own** (see
-`workflow_review`'s verdict in the session log and the CHANGELOG entry); the phase machine is
-terminal, so that verdict is not recorded against a feature.
+baseline. **This session's change (0.4.0) has independent reviews of its own** — round 1 FAIL 6.86
+(located nine defects, all fixed), round 2 PASS 8.43, then a small follow-up that fixed the five
+findings round 2 recorded — and the phase machine is terminal, so those verdicts are not recorded
+against a feature.
 
 ## Stale review records, and why
 
-`workflow_status` is the source of truth and now says WHICH kind each one is. The shapes to expect:
+`workflow_status` is the only source of truth here, and since 0.4.0 it says WHICH kind each record
+is. There are three kinds, and they are not interchangeable:
 
-- **Documentation-only staleness (cosmetic).** Records whose declared set was mostly code, but where
-  a document inside that set (`docs/TESTING.md`, `docs/DESIGN.md`, `CHANGELOG.md`, `README.md`,
-  `docs/ROADMAP.md`) was edited after the review. Their code claim still holds. These were
-  deliberately accepted by the user on 2026-11-01 rather than chased; re-reviewing them is
-  optional work.
-- **Code staleness (a re-review is owed).** Records whose declared files this session edited
-  (`lib/advance.js`, `lib/tools.js`, `lib/review.js`, `lib/handoff.js`, `lib/shared.js`, and the
-  tests). The code in them really did change, so their claim no longer covers the artefact.
-- Nothing is *blocked* by either: `HANDOFF` was entered before these edits, `HANDOFF` is terminal,
-  and no transition is waiting on them.
+- **`code changed` — a re-review is owed.** The record's per-file (or declared-set) evidence proves
+  that an executable file it covered has moved. At the time of writing: `p3-4-governance-mutant`,
+  `p3-5-code-minors`, `p0-review-record` — this session edited `lib/tools.js`, `lib/advance.js`,
+  `lib/review.js`, `lib/handoff.js` and `lib/shared.js`, which those records cover.
+- **`documents only` — cosmetic.** Every file that moved is a document, so the reviewed code claim
+  still holds; re-reviewing is optional bookkeeping. At the time of writing: `p3-6-docs-caveats`.
+- **`unclassified` — counted as owed.** The record's changed files could not be told apart (a mixed
+  declared set recorded before per-file digests existed). This is deliberately NOT called cosmetic
+  and NOT called code: at the time of writing `p3-2-eol`, `p3-7-dogfood`, `p3-3-ui-harness` and
+  `recovery-baseline` are here, and a re-review with the narrow set resolves them for good.
+
+Nothing is *blocked* by any of them: `HANDOFF` was entered before these edits, `HANDOFF` is
+terminal, and no transition is waiting on a stale record. But the gate still refuses a stale record,
+so "optional" above means "not urgent for delivery", not "the machine will let it through".
 
 If a future session wants the old records fresh, re-review each with its **narrow code-only set** —
 the exact per-feature lists are in the gitignored `handoff/P3-STATUS.md` (search for "NARROW
@@ -81,11 +87,12 @@ Recorded by the PASSing reviews; none blocks delivery, and each is a real (small
 
 ## Open decisions
 
-1. **Deliver 0.4.0.** The branch is one commit ahead of the pushed tip and `master` has never been
-   merged. Decide: push, merge `--ff-only`, sync to the profile, restart — or leave the deployment
-   at the previous build.
-2. **The stale records.** Re-review the code-stale ones, or accept them and let the new judgement
-   keep saying so. The documentation-only ones can be ignored indefinitely.
+1. **Deliver 0.4.0.** The branch is ahead of the pushed tip (read `git log origin/…..HEAD --oneline`
+   for the number — it moves) and `master` has never been merged. Decide: push, merge `--ff-only`,
+   sync to the profile, restart — or leave the deployment at the previous build.
+2. **The stale records.** Re-review the `code changed` and `unclassified` ones with their narrow
+   sets, or accept them and let the judgement keep saying so. The `documents only` ones can wait
+   indefinitely (the gate still refuses them; nothing is waiting on that refusal).
 3. **The two UI harness end-to-end proofs** need a normal terminal (the sandbox forbids the child
    processes they spawn). They are the last unverified surface.
 
