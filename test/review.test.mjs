@@ -31,6 +31,7 @@ import {
   renderVerificationGuidance,
   harnessesForDepth,
   discoverMutationHarnesses,
+  renderIsolation,
 } from '../lib/review.js'
 import { buildReviewToolDefinition } from '../lib/tools.js'
 import {
@@ -2725,3 +2726,30 @@ test('a real verdict is recorded for workflow_advance to consume', async () => {
 })
 
 
+
+test('the contaminated report names the two doubt buckets, not "unchanged"', () => {
+  // A review only reaches these buckets when a snapshot's hash budget was lowered, which the
+  // review path does not expose — but the wording is what an operator reads, and "unchanged"
+  // beside a file with no digest is how a pass lied before the 2026-10-25 security review.
+  // Kept here rather than in test/review-isolation.test.mjs: that file is inside a recorded
+  // review's declared set, and an unrelated test addition would stale the PASS.
+  const text = renderIsolation({
+    enabled: true,
+    files: 3,
+    contentHashed: true,
+    unhashed: 0,
+    fence: {
+      clean: false,
+      deleted: [],
+      modified: [],
+      added: [],
+      touched: ['a.js'],
+      unverified: ['b.js'],
+      restored: [],
+      restoreErrors: [],
+    },
+  }).join(' ')
+  assert.match(text, /possibly changed 1/)
+  assert.match(text, /unverifiable 1/)
+  assert.equal(text.includes('unchanged'), false, 'a doubt bucket is never reported as unchanged')
+})

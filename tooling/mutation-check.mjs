@@ -294,6 +294,14 @@ const MUTANTS = [
     replace: `  const evaluated = true`,
     must: ['an entry that never reached the evaluation still reports its unreadable signal'],
   },
+  {
+    id: 'M27',
+    what: 'action=list renders the ledger path but not the constraints it recorded (the dogfood defect)',
+    file: G,
+    find: `    const recorded = asArray(value.ledger.constraints)`,
+    replace: `    const recorded = []`,
+    must: ['the list REPORT renders the recorded constraints, not just the ledger path'],
+  },
 ]
 
 function sha(text) {

@@ -58,6 +58,7 @@ import {
   GC_SCOPES,
   buildGcToolDefinition,
   describeAskFailure,
+  renderGc,
   resolveUserQuestions,
 } from '../lib/gc.js'
 import { HISTORY_CAP, readState } from '../lib/advance.js'
@@ -1586,6 +1587,23 @@ test('list shows the ledger as recorded, with no analysis attached', async () =>
   assert.equal(result.ok, true)
   assert.equal(result.ledger.constraints.length, 1)
   assert.match(result.reason, /No retirement condition was evaluated/)
+})
+
+test('the list REPORT renders the recorded constraints, not just the ledger path', async () => {
+  // Found while dogfooding (p3-7): `action=list` answered with "ledger … present" and nothing
+  // else, because the renderer read a top-level `constraints` key no branch produced while the
+  // entries live under `ledger.constraints`. The tool could write a rule and not read it back.
+  const dir = makeProject({
+    constraints: {
+      constraints: [candidate({ id: 'C001', rule: 'declare only the claim’s files' })],
+    },
+  })
+  const result = await gcTool().execute({ action: 'list' }, execFor(dir))
+  const text = renderGc(result)
+  assert.match(text, /recorded constraints \(1\)/, 'the list must say how many are recorded')
+  assert.match(text, /  - C001 \[/, 'the id must be printed')
+  assert.match(text, /declare only the claim’s files/, 'the rule itself must be printed')
+  assert.match(text, /retire_when:/, 'the retirement condition is part of what list shows')
 })
 
 test('the user-questions service is probed through every documented shape', () => {
