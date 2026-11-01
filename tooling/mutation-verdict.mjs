@@ -31,7 +31,8 @@
  *   0  every mutant was caught
  *   1  a mutant survived (missed) or only partly failed (partial)
  *   2  NOT RUN: the baseline or a mutant run produced no verdict (environment), so this
- *      is not a pass. This is the same number the lock probe uses for its NOT RUN.
+ *      is not a pass. This is the same number the lock probe uses for its NOT RUN, and the
+ *      shared lock refusal (`EXIT_LOCK_HELD`) also uses 2 — both mean no run happened.
  *   3  source integrity failure (a file changed while the harness ran)
  *   4  an unusable mutant anchor (APPLY-FAILED): a harness defect, not a surviving mutant
  *
@@ -341,4 +342,41 @@ export function classifyMutant(run, required = []) {
     missing,
     reason: `red, but the named test(s) did not fail: ${missing.join('; ')}`,
   }
+}
+
+/**
+ * THE ONE EXIT-CODE TRUTH TABLE for the three harnesses.
+ *
+ * THE BUG THIS EXISTS TO PREVENT: the exit code must NOT be derived from the row counts alone.
+ * With a NOT RUN baseline and an empty mutant selection (a typo'd id, a stale filter) there are
+ * no rows, so a row-only ladder returns 0 — while the run has just printed "This is NOT a
+ * pass". The absence of a verdict is a property of the BASELINE, not of how many rows happened
+ * to be selected.
+ *
+ * Precedence: source integrity (3) > unusable anchor (4) > no verdict (2) > surviving mutant
+ * (1) > pass (0). 2 and 1 are deliberately different: an environment failure can never read as
+ * "the tests have teeth".
+ *
+ * @param {object} options
+ * @param {boolean} [options.integrityOk] - every mutated file was restored byte-for-byte.
+ * @param {'green'|'not-run'} options.baselineVerdict
+ * @param {number} [options.applyFailed]
+ * @param {number} [options.notRun]
+ * @param {number} [options.missed]
+ * @param {number} [options.partial]
+ * @returns {number} one of the EXIT_* constants.
+ */
+export function resolveHarnessExit({
+  integrityOk = true,
+  baselineVerdict,
+  applyFailed = 0,
+  notRun = 0,
+  missed = 0,
+  partial = 0,
+} = {}) {
+  if (!integrityOk) return EXIT_SOURCE_CHANGED
+  if (applyFailed > 0) return EXIT_APPLY_FAILED
+  if (baselineVerdict !== 'green' || notRun > 0) return EXIT_NOT_RUN
+  if (missed + partial > 0) return EXIT_MISSED
+  return EXIT_OK
 }

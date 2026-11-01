@@ -25,13 +25,10 @@ import { fileURLToPath } from 'node:url'
 import { runCaptured } from './child-output.mjs'
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
 import {
-  EXIT_APPLY_FAILED,
-  EXIT_MISSED,
   EXIT_NOT_RUN,
-  EXIT_OK,
-  EXIT_SOURCE_CHANGED,
   classifyBaseline,
   classifyMutant,
+  resolveHarnessExit,
 } from './mutation-verdict.mjs'
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -278,18 +275,22 @@ async function main() {
 
       const count = verdict => rows.filter(row => row.verdict === verdict).length
       console.log(
-        `caught ${count('caught')}; partial ${count('partial')}; missed ${count('missed')}; ` +
+        `baseline ${baseline.verdict === 'green' ? 'green' : 'NOT RUN'}; ` +
+          `caught ${count('caught')}; partial ${count('partial')}; missed ${count('missed')}; ` +
           `not run ${count('not-run')}; apply-failed ${count('apply-failed')}`,
       )
 
-      // AN APPLY-FAILED MUTANT IS NOT A PASS, and neither is NOT RUN. They get different
-      // non-zero codes so a missing verdict can never be read as a surviving mutant, or as a
-      // pass. 2 is the lock probe's NOT RUN code; 1 is the surviving-mutant code.
-      let exitCode = EXIT_OK
-      if (before !== after) exitCode = EXIT_SOURCE_CHANGED
-      else if (count('apply-failed') > 0) exitCode = EXIT_APPLY_FAILED
-      else if (count('not-run') > 0) exitCode = EXIT_NOT_RUN
-      else if (count('partial') + count('missed') > 0) exitCode = EXIT_MISSED
+      // THE EXIT CODE COMES FROM THE BASELINE TOO, NOT FROM THE ROWS. An empty mutant
+      // selection (a typo'd id) has zero rows, and a row-only ladder would exit 0 on a
+      // NOT RUN baseline while printing "This is NOT a pass".
+      const exitCode = resolveHarnessExit({
+        integrityOk: before === after,
+        baselineVerdict: baseline.verdict,
+        applyFailed: count('apply-failed'),
+        notRun: count('not-run'),
+        missed: count('missed'),
+        partial: count('partial'),
+      })
       if (exitCode === EXIT_NOT_RUN) {
         console.log(`NOT RUN: no honest verdict exists here, so this is NOT a pass (exit ${EXIT_NOT_RUN}).`)
       }

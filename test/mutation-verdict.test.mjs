@@ -28,6 +28,7 @@ import {
   classifyRun,
   readFailures,
   readTestSummary,
+  resolveHarnessExit,
 } from '../tooling/mutation-verdict.mjs'
 
 const LAYOUT = 'the shipped panel grid resolves to one column with a full-width label'
@@ -288,6 +289,52 @@ test('NOT RUN for an unstarted, killed or empty run — never a green or a catch
     'not-run',
   )
   assert.match(classifyRun(specRun({ pass: 0, fail: 0 })).reason, /no test executed/)
+})
+
+test('NOT RUN: a spec-reporter run whose only failure is the browser message', () => {
+  const result = classifyMutant(specRed(LAYOUT, `Error: ${BROWSER_MESSAGE}`), [NAMED])
+  assert.equal(result.verdict, 'not-run')
+  assert.equal(result.realFailures.length, 0)
+  assert.match(result.reason, /browser exited early with 2147483651/)
+})
+
+test('resolveHarnessExit: a NOT RUN baseline exits 2 even with an EMPTY selection', () => {
+  // The regression the review found: zero selected mutants must not turn a NOT RUN baseline
+  // into exit 0 just because the row list is empty.
+  assert.equal(
+    resolveHarnessExit({
+      baselineVerdict: 'not-run',
+      notRun: 0,
+      applyFailed: 0,
+      missed: 0,
+      partial: 0,
+    }),
+    EXIT_NOT_RUN,
+  )
+  assert.equal(resolveHarnessExit({ baselineVerdict: 'not-run', notRun: 14 }), EXIT_NOT_RUN)
+  assert.equal(resolveHarnessExit({ baselineVerdict: 'green', notRun: 1 }), EXIT_NOT_RUN)
+})
+
+test('resolveHarnessExit: precedence is integrity > apply-failed > no verdict > missed > pass', () => {
+  assert.equal(resolveHarnessExit({ baselineVerdict: 'green' }), EXIT_OK)
+  assert.equal(resolveHarnessExit({ baselineVerdict: 'green', missed: 1 }), EXIT_MISSED)
+  assert.equal(resolveHarnessExit({ baselineVerdict: 'green', partial: 1 }), EXIT_MISSED)
+  assert.equal(
+    resolveHarnessExit({ baselineVerdict: 'green', missed: 1, applyFailed: 1 }),
+    EXIT_APPLY_FAILED,
+  )
+  assert.equal(
+    resolveHarnessExit({ baselineVerdict: 'not-run', notRun: 1, applyFailed: 1 }),
+    EXIT_APPLY_FAILED,
+  )
+  assert.equal(
+    resolveHarnessExit({ integrityOk: false, baselineVerdict: 'green', missed: 1 }),
+    EXIT_SOURCE_CHANGED,
+  )
+  assert.equal(
+    resolveHarnessExit({ integrityOk: false, baselineVerdict: 'not-run', applyFailed: 1 }),
+    EXIT_SOURCE_CHANGED,
+  )
 })
 
 test('the exit codes keep NOT RUN and a surviving mutant apart', () => {

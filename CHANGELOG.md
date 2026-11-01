@@ -22,6 +22,22 @@ live until it has been synced and DSH restarted.
 
 ## [Unreleased] — 2026-11-01
 
+### Fixed — a browser-only red counted as a caught mutant in the three UI harnesses
+
+`mutation-check-client.mjs`, `mutation-check-panel.mjs` and `mutation-check-project-tab.mjs`
+spawn `test/status.test.mjs` directly and judged a mutant with `caught: failed.length > 0`. In the
+DSH sandbox the layout case reaches Chromium and dies with `the browser exited early with
+2147483651`, so the suite was red for an **environment** reason and every mutant looked caught
+(measured: `M1 CAUGHT count=2`, exit 0). The three harnesses now run the unmutated baseline first
+and share `tooling/mutation-verdict.mjs`, which splits real from environment failures and answers
+`caught`, `missed`, `partial` or `NOT RUN`; only a real failing assertion can catch a mutant. A
+baseline that cannot produce a verdict prints one line naming the browser and exits **2** (not a
+pass; a surviving mutant is 1, APPLY-FAILED 4, an integrity failure 3), and the exit-code truth
+table is shared and unit-tested — including the case where a typo'd mutant filter leaves zero rows.
+`test/mutation-verdict.test.mjs` pins all four outcomes with synthetic spec and TAP output, no
+browser needed. The end-to-end caught counts still need a normal terminal with a Chromium-family
+browser: the three harnesses are **NOT RUN in-sandbox** after this change.
+
 ### Fixed — the review fence could pass a project it had never content-hashed
 
 `lib/review-sandbox.js` compared files by content digest only while a 64 MiB budget lasted, and the

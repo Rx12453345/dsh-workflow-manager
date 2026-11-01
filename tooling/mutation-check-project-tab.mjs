@@ -38,13 +38,10 @@ import { runCaptured } from './child-output.mjs'
 // mutates lib/client.js too, and this harness rewrites the same file, so they must contend.
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from './mutation-lock.mjs'
 import {
-  EXIT_APPLY_FAILED,
-  EXIT_MISSED,
   EXIT_NOT_RUN,
-  EXIT_OK,
-  EXIT_SOURCE_CHANGED,
   classifyBaseline,
   classifyMutant,
+  resolveHarnessExit,
 } from './mutation-verdict.mjs'
 
 /** Every harness takes this lock, so no two of them can rewrite lib/ at the same time. */
@@ -689,27 +686,31 @@ async function main() {
       const equivalent = count('equivalent')
       const notRun = count('not-run')
       const applyFailed = count('apply-failed')
+      const baselineLabel = baseline.verdict === 'green' ? 'green' : 'NOT RUN'
       if (notRun === 0 && applyFailed === 0) {
         console.log(
-          `\ncaught ${caught}/${rows.length - equivalent} killable mutants ` +
+          `\nbaseline ${baselineLabel}; caught ${caught}/${rows.length - equivalent} killable mutants ` +
             `(${equivalent} declared behaviourally equivalent, ${missed} missed)`,
         )
       } else {
         console.log(
-          `\ncaught ${caught}; partial ${count('partial')}; missed ${missed}; ` +
+          `\nbaseline ${baselineLabel}; caught ${caught}; partial ${count('partial')}; missed ${missed}; ` +
             `equivalent ${equivalent}; not run ${notRun}; apply-failed ${applyFailed}`,
         )
       }
       console.log(`source restored byte-for-byte: ${before === after ? 'YES' : 'NO — INVESTIGATE'}`)
 
-      // AN APPLY-FAILED MUTANT IS NOT A PASS, and neither is NOT RUN. They get different
-      // non-zero codes so a missing verdict can never be read as a surviving mutant, or as a
-      // pass. 2 is the lock probe's NOT RUN code; 1 is the surviving-mutant code.
-      let exitCode = EXIT_OK
-      if (before !== after) exitCode = EXIT_SOURCE_CHANGED
-      else if (applyFailed > 0) exitCode = EXIT_APPLY_FAILED
-      else if (notRun > 0) exitCode = EXIT_NOT_RUN
-      else if (count('partial') + missed > 0) exitCode = EXIT_MISSED
+      // THE EXIT CODE COMES FROM THE BASELINE TOO, NOT FROM THE ROWS. An empty mutant
+      // selection (a typo'd id) has zero rows, and a row-only ladder would exit 0 on a
+      // NOT RUN baseline while printing "This is NOT a pass".
+      const exitCode = resolveHarnessExit({
+        integrityOk: before === after,
+        baselineVerdict: baseline.verdict,
+        applyFailed,
+        notRun,
+        missed,
+        partial: count('partial'),
+      })
       if (exitCode === EXIT_NOT_RUN) {
         console.log(`NOT RUN: no honest verdict exists here, so this is NOT a pass (exit ${EXIT_NOT_RUN}).`)
       }

@@ -178,11 +178,15 @@ unflagged run is the honest NOT RUN — exit 2 is not a pass and must not be rea
 
 ## 5. What remains
 
-- **`p3-3-ui-harness` — needs a browser.** A Chromium-only red test can still be counted as a caught
-  mutant: the three UI harnesses spawn `test/status.test.mjs` directly without
-  `DSH_WORKFLOW_SANDBOX`, so in the sandbox the layout case reaches a browser launch that fails.
-  The fix is to classify that failure as **NOT RUN**, not "red", and to pin the classification
-  without a browser. It cannot be demonstrated in this sandbox.
+- **`p3-3-ui-harness` — FIXED; the end-to-end proof needs a browser.** The three UI harnesses used
+  to count a Chromium-only red as a caught mutant: they spawn `test/status.test.mjs` directly without
+  `DSH_WORKFLOW_SANDBOX`, so in the sandbox the layout case reaches a browser launch that fails. They
+  now run the unmutated baseline first and share `tooling/mutation-verdict.mjs`, which splits real
+  from environment failures: a baseline with no verdict is **NOT RUN**, names the browser and exits
+  **2** (not a pass), and only a real failing assertion can catch a mutant.
+  `test/mutation-verdict.test.mjs` pins the classification without a browser. What remains is the
+  end-to-end caught-count proof, which needs a normal terminal with a Chromium-family browser: the
+  three harnesses are **NOT RUN in-sandbox** after this change.
 - **`p3-7-dogfood` — its constraint step needs the user.** Recording a real constraint goes through
   `workflow_gc action=add`, which asks the user for confirmation; this session has no human channel
   (`approval.strength: llm-only`). The stats / handoff-doc / policy parts can be exercised offline;
