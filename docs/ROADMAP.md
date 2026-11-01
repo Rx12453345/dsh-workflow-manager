@@ -239,6 +239,17 @@ the host's own function), or an explicit decision to leave it out.
 
 ## Known defects and debts
 
+### `modules.handoffDoc` is a switch with no implementation
+**What it is.** `modules.handoffDoc` (default `true`) is declared in `lib/config.js`, rendered on the
+settings page and listed by `workflow_status`, but **no code reads it**: there is no handoff-document
+renderer and no test. Switching it off or on changes nothing — a user-visible knob that lies.
+**How it was found.** The dogfood pass (2026-11-01) went looking for the "handoff doc output" the module
+name promises and there was none.
+**Why it is unfinished.** Two honest fixes exist and they are different features: implement the document
+(the module's name says what it would be), or remove the switch (a config migration, with the settings
+page and the status list to update). Neither is a one-line change, and picking one is a product decision.
+**What it would take.** A decision, then one of the two, plus the tests that keep it from drifting back.
+
 ### The gate cannot authorise its own first deployment
 **What it is.** A chicken-and-egg loop, and it is structural, not a bug in the ordinary sense. The copy
 running the gate is the old copy in the profile (`file:` dependencies are copies, not symlinks), and
