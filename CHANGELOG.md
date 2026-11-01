@@ -45,7 +45,7 @@ implements the document its name promises.
 - **`workflow_status` renders a bounded summary** of the same builder — the path with its size and
   modification time, the complete/open/stale counts, and one next action. Three lines: the full
   brief is on disk, and inlining it would make an already-long status report truncated.
-- **`test/handoff.test.mjs`** (8 cases) pins the brief's content, the off switch, the `.dsh/`-only
+- **`test/handoff.test.mjs`** (12 cases) pins the brief's content, the off switch, the `.dsh/`-only
   target, the idempotent rewrite, the bounded status section with counts matching the state, and a
   project with no review evidence. A failing write is reported in the `workflow_advance` reply
   rather than turning a legal `HANDOFF` move into a failure.

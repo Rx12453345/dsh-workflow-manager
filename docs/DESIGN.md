@@ -377,7 +377,9 @@ piped child (`EPERM`) and cannot start a Chromium-family browser. So:
 - `tooling/mutation-check-lock-probe.mjs` prints `NOT RUN` and exits **2** in the sandbox unless
   `DSH_WORKFLOW_SANDBOX=1` is set, because its unmutated baseline cannot be green when the lock
   tests' piped children are denied. **Exit 2 is not a pass.**
-- The mutation-lock race cases in `test/mutation-lock.test.mjs` skip with a reason.
+- The mutation-lock race cases in `test/mutation-lock.test.mjs` that use pipes skip with a reason;
+  the PIPE-FREE race case runs there, because its children report through files (`stdio: 'ignore'`)
+  instead of pipes.
 
 Everything else runs there, including `test/review.test.mjs` and `test/governance.test.mjs`; the
 harnesses capture their child through temp files (`tooling/child-output.mjs`) instead of a pipe. The

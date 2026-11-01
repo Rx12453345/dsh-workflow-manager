@@ -112,11 +112,10 @@ about its central premise. These are the corrections, with how they were establi
 
 - **Branch:** development sits directly on one branch, `recovery/p2b1-content`; `git status -sb`
   reads the branch, the upstream and the ahead count today.
-- **Unit suite:** `node run-unit-tests.mjs` (Node v24.18.0 inside the DSH sandbox) must exit 0 with
-  no failures. Seven cases skip in a sandbox: five mutation-lock race cases, the Chromium layout
-  measurement, and the pre-existing Windows `SIGTERM` limitation. A skip is not a pass — see
-  [`TESTING.md`](TESTING.md) Layer 1.1. The totals are not restated here; they move with every test
-  added, so read them from the run.
+- **Unit suite:** `node run-unit-tests.mjs` must exit 0 with no failures. Some cases skip in a
+  sandbox — the piped mutation-lock race cases, the Chromium layout measurement, and the pre-existing
+  Windows `SIGTERM` limitation; the exact set is listed in [`TESTING.md`](TESTING.md) §1.1, and the
+  counts are not restated here because they move with every test added. A skip is not a pass.
 - **Other sensors:** `node run-smoke-test.mjs` → `smoke test passed`;
   `node run-config-check.mjs` → two `OK` lines (every patch value matches its code default; resolved
   `maxDepth` is 2).
@@ -196,10 +195,12 @@ unflagged run is the honest NOT RUN — exit 2 is not a pass and must not be rea
   documents later commits edit. So the rule is mechanical: re-review and re-record after changing a
   reviewed file. Whether any record is currently fresh is not stated here — `workflow_status` answers
   it, reporting every recorded PASS whose files changed as STALE.
-- **`p3-6-docs-caveats` is not closed.** Its docs fixes are committed (`b7f13a1`) and the docs-truth
-  pass extends them; the earlier review chain used its whole two-round budget (round 1 PASS, round 2
-  FAIL on two documentation defects fixed in that commit), so this pass re-reviews the current bytes
-  as a fresh sequence, round 1. The feature is recorded complete only from that verdict.
+- **`p3-6-docs-caveats` had not been closed when this paragraph was written (2026-11-01).** Its docs
+  fixes are committed (`b7f13a1`) and the docs-truth pass extended them; the earlier review chain used
+  its whole two-round budget (round 1 PASS, round 2 FAIL on two documentation defects fixed in that
+  commit), so that pass re-reviewed the current bytes as a fresh sequence. Whether the feature is
+  closed NOW is not stated here: `workflow_status` reports each feature's `passes` and the freshness
+  of the review it rests on. This paragraph is history, not a live claim.
 - **Push and deploy are the human's.** `git push` is refused by the gate (a remote-https pipe is
   denied under `workspace-write`, and `danger-full-access` is disproportionate for publishing one
   branch); deploying is `tooling/sync-to-profile.mjs` plus a DSH restart, run by a human. On

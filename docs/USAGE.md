@@ -144,7 +144,13 @@ value=false`) writes no file and removes the status section.
 `.dsh/HANDOFF.md` is **not** the repository's own `HANDOFF.md`: the root file is a human-written
 document and is never touched. `.dsh/` is the workflow's directory (gitignored), so the generated
 brief never appears in `git status` and can never be declared as a reviewed file. Do not hand-edit
-it — it is regenerated from the state, and a later `HANDOFF` entry overwrites it.
+it — it is generated from the state.
+
+**It is a snapshot, not a live view.** The brief is written when the project ENTERS `HANDOFF`, and
+`HANDOFF` is terminal, so nothing regenerates it afterwards: reviews recorded later do not change the
+file, and its FRESH/STALE labels can therefore be out of date. Read `workflow_status` for the current
+freshness; the status line also prints the file's modification time, so you can see how old the
+snapshot is.
 
 ---
 

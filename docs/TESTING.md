@@ -164,9 +164,12 @@ cases then call `t.skip()` with a visible reason. **They are NOT RUN. They are n
   still run, but **the rendered outcome is unmeasured in the sandbox**. In a normal terminal with a
   Chromium-family browser it runs; without one it skips with its own reason
   (`no Chromium-family browser on this machine; the resolved layout was not computed`).
-- **The mutation-lock race cases are NOT RUN in the sandbox.** The cases in
-  `test/mutation-lock.test.mjs` that launch child processes are denied their pipes (`EPERM`) and
-  skip by name.
+- **The PIPED mutation-lock race cases are NOT RUN in the sandbox.** The cases in
+  `test/mutation-lock.test.mjs` that read their children through pipes are denied them (`EPERM`) and
+  skip by name. The **pipe-free** race case is the exception and must PASS there: its children are
+  spawned with `stdio: 'ignore'` and report through files, which is why it exists — the race it
+  reproduces (two winners on an empty lock) reached CI precisely because the piped variant only ever
+  ran there.
 - **Everything else runs**, including `test/review.test.mjs`, `test/review-isolation.test.mjs`,
   `test/governance.test.mjs`, `test/approval.test.mjs` and the rest of `test/status.test.mjs`: they
   do not need a pipe or a browser. The harnesses that capture a child at all do it through temp
