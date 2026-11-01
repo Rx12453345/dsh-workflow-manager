@@ -269,6 +269,7 @@ ask for a differently shaped action.
 | `docs/PITFALLS.md` | what went wrong, with root cause and fix |
 | `docs/TESTING.md` | how to verify, layer by layer |
 | `docs/ROADMAP.md` | what is not done |
+| `docs/HANDOFF-STATE.md` | where the last session stopped; written at session end and **never** declared in a review |
 | `CHANGELOG.md` | user-visible changes |
 | `CONTRIBUTING.md` | this file: what must run before "done" |
 
@@ -285,6 +286,12 @@ including a documentation truth pass — makes that PASS `stale`: `workflow_stat
 So either **scope each documentation edit to the feature that owns the file**, or **budget a re-review of
 the earlier feature** and expect its PASS to go stale. Do not edit the evidence, and do not try to make
 `record-review` accept a verdict the bytes no longer match.
+
+**One document is deliberately exempt: `docs/HANDOFF-STATE.md`.** It is written at the end of a session
+and is **never** declared in a review's `changed_files` (constraint C002). Staleness comes from the
+fingerprint, which covers only declared files, so a tracked document that is never declared costs one
+commit and no re-review — while declaring it would stale every feature whose review had covered it, and
+the document's whole purpose is to be writable after the last review without triggering that.
 
 ### Found a code defect while documenting? Report it, don't fix it
 

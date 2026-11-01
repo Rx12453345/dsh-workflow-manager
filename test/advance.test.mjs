@@ -37,6 +37,9 @@ import {
   buildBootstrap,
   fingerprint,
   reviewFreshness,
+  reviewFreshnessAll,
+  reviewedFileDigest,
+  reviewedFileDigests,
   emptyFeatures,
   readState,
   writeState,
@@ -47,6 +50,7 @@ import {
 } from '../lib/advance.js'
 import { buildAdvanceToolDefinition, buildReviewToolDefinition, buildToolDefinition, renderStatus } from '../lib/tools.js'
 import { resolveConfig } from '../lib/config.js'
+import { describeStaleJudgement } from '../lib/shared.js'
 import { reviewOutcomeKey } from '../lib/work-unit.js'
 
 /** A project directory with an optional `.dsh/workflow.yml` (its presence = opt-in). */
@@ -565,6 +569,275 @@ test('reviewFreshness degrades malformed evidence to unknown without throwing', 
 })
 
 // ---------------------------------------------------------------------------
+// the stale judgement: code moved, or only the documents in the set?
+// ---------------------------------------------------------------------------
+//
+// THE PROBLEM THIS PINS was measured on this repository: `workflow_status` advised "re-review 6
+// stale feature(s)" when most of those records were stale because a DOCUMENT inside their declared
+// set had been edited. Chasing all six cost hours. The judgement must be sound in BOTH directions:
+// a wrong "documents only" would advise skipping a re-review of code that really moved, so a mixed
+// set with no per-file evidence has to answer `unknown`, never a guess.
+
+/** A temp project containing `{ path: text }`. */
+function projectWithFiles(files) {
+  const dir = makeProject()
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(join(dir, ...path.split('/').slice(0, -1)), { recursive: true })
+    writeFileSync(join(dir, path), text, 'utf8')
+  }
+  return dir
+}
+
+/** A feature carrying a review row over `files`, shaped like record-review writes it. */
+function featuredWith(dir, id, files) {
+  return { ...reviewedFeature(dir, files), id }
+}
+
+test('a stale record whose declared set is code is judged code-stale', () => {
+  const dir = projectWithFiles({ 'lib/x.js': 'let x = 1\n' })
+  try {
+    const features = { features: [reviewedFeature(dir, ['lib/x.js'])] }
+    writeFileSync(join(dir, 'lib/x.js'), 'let x = 2\n', 'utf8')
+    const stale = reviewFreshness(dir, undefined, features)
+    assert.equal(stale.state, 'stale')
+    assert.equal(stale.staleKind, 'code')
+    assert.equal(stale.staleKindCause, 'declared-set')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a stale record whose declared set is documentation is judged docs-stale', () => {
+  const dir = projectWithFiles({ 'docs/notes.md': 'one\n' })
+  try {
+    const features = { features: [reviewedFeature(dir, ['docs/notes.md'])] }
+    writeFileSync(join(dir, 'docs/notes.md'), 'two\n', 'utf8')
+    const stale = reviewFreshness(dir, undefined, features)
+    assert.equal(stale.state, 'stale')
+    assert.equal(stale.staleKind, 'docs')
+    assert.equal(stale.staleKindCause, 'declared-set')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a MIXED declared set with no per-file digests is judged unknown, never a guess', () => {
+  const dir = projectWithFiles({ 'lib/x.js': 'let x = 1\n', 'docs/notes.md': 'one\n' })
+  try {
+    const features = { features: [reviewedFeature(dir, ['lib/x.js', 'docs/notes.md'])] }
+    writeFileSync(join(dir, 'docs/notes.md'), 'two\n', 'utf8')
+    const stale = reviewFreshness(dir, undefined, features)
+    assert.equal(stale.state, 'stale')
+    assert.equal(stale.staleKind, 'unknown')
+    assert.equal(stale.staleKindCause, 'declared-set')
+    assert.equal(stale.changedFiles, null)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('per-file digests name the ONE file that moved, so a mixed set is judged exactly', () => {
+  const dir = projectWithFiles({ 'lib/x.js': 'let x = 1\n', 'docs/notes.md': 'one\n' })
+  try {
+    const files = ['lib/x.js', 'docs/notes.md']
+    const features = {
+      features: [
+        reviewedFeature(dir, files, {
+          file_digests: reviewedFileDigests(dir, files).digests,
+          file_digests_total: files.length,
+        }),
+      ],
+    }
+    writeFileSync(join(dir, 'docs/notes.md'), 'two\n', 'utf8')
+    const stale = reviewFreshness(dir, undefined, features)
+    assert.equal(stale.state, 'stale')
+    assert.equal(stale.staleKind, 'docs')
+    assert.equal(stale.staleKindCause, 'digests')
+    assert.deepEqual(stale.changedFiles, ['docs/notes.md'])
+
+    // …and the same record with the CODE file edited is code-stale, so the evidence is read
+    // rather than the class of the majority.
+    const codeEdited = {
+      features: [
+        reviewedFeature(dir, files, {
+          file_digests: reviewedFileDigests(dir, files).digests,
+          file_digests_total: files.length,
+        }),
+      ],
+    }
+    writeFileSync(join(dir, 'lib/x.js'), 'let x = 2\n', 'utf8')
+    const codeStale = reviewFreshness(dir, undefined, codeEdited)
+    assert.equal(codeStale.staleKind, 'code')
+    assert.deepEqual(codeStale.changedFiles, ['lib/x.js'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a TRUNCATED per-file digest map that names no moved file is unknown, not fresh-looking', () => {
+  const dir = projectWithFiles({ 'lib/x.js': 'let x = 1\n', 'docs/notes.md': 'one\n' })
+  try {
+    const files = ['lib/x.js', 'docs/notes.md']
+    const full = reviewedFileDigests(dir, files)
+    const features = {
+      features: [
+        reviewedFeature(dir, files, {
+          // Only one digest was persisted, so the changed file may be the one that was not.
+          file_digests: { 'lib/x.js': full.digests['lib/x.js'] },
+          file_digests_total: 2,
+          file_digests_truncated: true,
+        }),
+      ],
+    }
+    writeFileSync(join(dir, 'docs/notes.md'), 'two\n', 'utf8')
+    const stale = reviewFreshness(dir, undefined, features)
+    assert.equal(stale.state, 'stale')
+    assert.equal(stale.staleKind, 'unknown')
+    assert.equal(stale.staleKindCause, 'declared-set')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a restored deletion is judged by the restored path, not by the empty file set', () => {
+  const dir = makeProject()
+  try {
+    mkdirSync(join(dir, 'lib'), { recursive: true })
+    const features = {
+      features: [
+        feature('F001', 1, {
+          passes: true,
+          evidence: [
+            {
+              type: 'review',
+              at: '2026-01-01T00:00:00.000Z',
+              passed: true,
+              files: [],
+              files_fingerprint: fingerprint(dir, [], '', ''),
+              git_cross_check: { deleted: ['lib/gone.js'], deletedTotal: 1 },
+            },
+          ],
+        }),
+      ],
+    }
+    // The deletion the review approved was restored afterwards.
+    writeFileSync(join(dir, 'lib/gone.js'), 'module.exports = 1\n', 'utf8')
+    const stale = reviewFreshness(dir, undefined, features)
+    assert.equal(stale.state, 'stale')
+    assert.equal(stale.cause, 'deletion-restored')
+    assert.equal(stale.staleKind, 'code')
+    assert.equal(stale.staleKindCause, 'deletions')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the per-feature judgement aggregates into the ids the reports print', () => {
+  const dir = projectWithFiles({ 'lib/x.js': 'let x = 1\n', 'docs/notes.md': 'one\n' })
+  try {
+    const codeFeature = featuredWith(dir, 'F001', ['lib/x.js'])
+    const docsFeature = featuredWith(dir, 'F002', ['docs/notes.md'])
+    writeFileSync(join(dir, 'lib/x.js'), 'let x = 2\n', 'utf8')
+    writeFileSync(join(dir, 'docs/notes.md'), 'two\n', 'utf8')
+    const summary = reviewFreshnessAll(dir, undefined, { features: [codeFeature, docsFeature] })
+    assert.deepEqual(summary.staleKinds, { code: ['F001'], docs: ['F002'], unknown: [] })
+    const line = describeStaleJudgement(summary.staleKinds)
+    // BOUNDED AND PATH-FREE: a reader is told WHICH FEATURE to re-review, never a file path that
+    // could be a fragment of the reviewed set (and that the evidence never promised to name).
+    assert.match(line, /1 re-review\(s\) owed \(code changed: F001\)/)
+    assert.match(line, /1 cosmetic \(documents only: F002/)
+    assert.doesNotMatch(line, /lib\/x\.js|docs\/notes\.md/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('describeStaleJudgement is empty for no stale record, and bounded when the ids are many', () => {
+  assert.equal(describeStaleJudgement({ code: [], docs: [], unknown: [] }), '')
+  assert.equal(describeStaleJudgement(null), '')
+  assert.equal(describeStaleJudgement({ code: 'F001' }), '')
+  const many = Array.from({ length: 11 }, (_, index) => `F${String(index + 1).padStart(3, '0')}`)
+  const line = describeStaleJudgement({ code: many, docs: [], unknown: [] })
+  assert.match(line, /11 re-review\(s\) owed/)
+  assert.match(line, /and 3 more/)
+})
+
+test('the per-file digest is line-ending independent, like the combined fingerprint', () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'crlf.js'), 'let x = 1\r\nlet y = 2\r\n', 'utf8')
+    writeFileSync(join(dir, 'lf.js'), 'let x = 1\nlet y = 2\n', 'utf8')
+    assert.equal(reviewedFileDigest(dir, 'crlf.js'), reviewedFileDigest(dir, 'lf.js'))
+    assert.equal(reviewedFileDigest(dir, 'missing.js'), reviewedFileDigest(dir, 'missing.js'))
+    assert.match(reviewedFileDigest(dir, 'missing.js'), /^unreadable:/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the reviewer findings survive the session in the evidence row and in status', async () => {
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    const def = buildAdvanceToolDefinition(options)
+    // A reachable MAJOR does not block the verdict (only reachable blockers and reachable
+    // veto-dimension defects do), so this review passes AND carries findings — the case that
+    // used to leave a completed feature looking spotless.
+    const { reviewDef, reviewExec } = reviewRig(options, execFor(dir), 9, [
+      { where: 'a.js', what: 'A minor thing. The rest is prose.', fix: 'tidy it', severity: 'minor', dimension: 'legibility', reachable: true },
+      { where: 'a.js', what: 'An unreachable major.', fix: 'not worth it', severity: 'major', dimension: 'regressions', reachable: false },
+    ])
+
+    writeFileSync(join(dir, 'a.js'), 'let x = 1\n', 'utf8')
+    await def.execute(
+      { action: 'advance', to: 'PLAN', features: [{ id: 'F001', description: 'x', steps: ['a'], priority: 1 }] },
+      execFor(dir),
+    )
+    await def.execute({ action: 'pick' }, execFor(dir))
+    await reviewDef.execute({ feature: 'x', changed_files: ['a.js'] }, reviewExec)
+    const applied = await def.execute({ action: 'record-review', feature_id: 'F001' }, execFor(dir))
+    assert.equal(applied.ok, true, JSON.stringify(applied))
+    assert.equal(applied.passed, true)
+
+    const row = readFeatures(dir).features.features[0].evidence.at(-1)
+    assert.equal(row.type, 'review')
+    assert.equal(Array.isArray(row.issues), true, 'the findings are persisted with the verdict')
+    // Severity first, then reachability: the retained order is the order to read them in.
+    assert.deepEqual(
+      row.issues.map(issue => issue.severity),
+      ['major', 'minor'],
+    )
+    assert.equal(row.issues[1].reachable, true)
+    assert.equal(row.issues[1].title, 'A minor thing.')
+
+    const status = await buildToolDefinition(options).execute({}, execFor(dir))
+    const text = renderStatus(status)
+    assert.match(text, /findings: F001 — 2 recorded finding\(s\) \(1 major, 1 minor; 1 reachable\)/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a review row written before findings were persisted renders no findings line', async () => {
+  const dir = makeProject()
+  try {
+    const options = { config: resolveConfig({}), ctx: null, services: null }
+    writeFileSync(join(dir, 'a.js'), 'let x = 1\n', 'utf8')
+    writeFileSync(
+      join(dir, FEATURES_RELATIVE_PATH),
+      JSON.stringify({ features: [reviewedFeature(dir, ['a.js'])] }, null, 2),
+      'utf8',
+    )
+    const status = await buildToolDefinition(options).execute({}, execFor(dir))
+    // BACKWARD COMPATIBILITY: an absent `issues` field is "not recorded", not "none found", so
+    // the report of an old project is byte-identical to what it was before this feature.
+    assert.doesNotMatch(renderStatus(status), /findings:/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ---------------------------------------------------------------------------
 // the session bootstrap
 // ---------------------------------------------------------------------------
 
@@ -1034,7 +1307,7 @@ test('pick reports an illegal-transition rather than lying when it cannot move',
 })
 
 /** A review tool definition plus a stub reviewer that scores everything at `score`. */
-function reviewRig(options, exec, score = 9) {
+function reviewRig(options, exec, score = 9, issues = []) {
   const reviewDef = buildReviewToolDefinition(options)
   const reviewExec = {
     ...exec,
@@ -1052,7 +1325,7 @@ function reviewRig(options, exec, score = 9) {
               'legibility',
               'scope',
             ].map(dimension => ({ dimension, score, rationale: '' })),
-            issues: [],
+            issues,
           },
           output: [],
         }),

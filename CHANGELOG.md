@@ -3,7 +3,7 @@
 All notable changes to this project are documented here.
 Entries are grouped by the date the work landed; the version line is the one recorded in `package.json`.
 
-Version recorded in `package.json`: **0.3.0**.
+Version recorded in `package.json`: **0.4.0**.
 
 `0.3.0` is the **recovered checkout**: the tree rebuilt from the session logs (see
 [`docs/RECOVERY.md`](docs/RECOVERY.md)) plus the P3 changes. It was **deployed as 0.3.0 on
@@ -17,6 +17,41 @@ carried them.
 
 Deployment is not uniform: a `file:` dependency is a **copy, not a symlink**, so implemented work is not
 live until it has been synced and DSH restarted.
+
+---
+
+## [Unreleased] — 2026-11-02 (0.4.0)
+
+### Changed — the recorded state survives a context reset, and judges staleness
+
+Three problems, all measured in one session, all of them the same shape: the state carried a verdict
+but not the reason for it.
+
+- **The reviewer's findings are persisted.** A review's evidence row stored the score, the files and
+  the digests — and nothing about what the reviewer complained about, so a later session could see
+  "PASS 9.29 over these 15 files" and be blind to three unfixed minors. `workflow_advance
+  action=record-review` now writes a bounded `issues` summary (dimension, severity, reachable, a
+  one-sentence title; at most 10, ordered by consequence so truncation cannot drop a blocker, with
+  `issuesTotal` when it does). `workflow_status` and the handoff brief print it per feature. A row
+  written before this has no `issues` field and reads as "not recorded", never as "nothing found".
+- **Staleness is judged, not just announced.** "re-review 6 stale feature(s)" was wrong advice: most
+  of those records were stale because a document inside their declared set had been edited, and
+  chasing all six cost hours. `reviewFreshness` now records per-file digests, and the status line and
+  the brief say which stale records owe a review (`code changed`) and which are cosmetic
+  (`documents only`); a mixed set with no per-file evidence answers `unknown` rather than guessing.
+  The classification is the project's own (`verification.sources`/`security`/`ui`/`nonExecutable`),
+  not a second extension list.
+- **The brief no longer freezes at HANDOFF.** It was written only when the project entered `HANDOFF`,
+  which is terminal, so every later `record-review` left the file describing a past state (it said
+  7/8 complete and six stale while the state said 8/8 and five). Every state write now refreshes it —
+  phase moves and `record-review` alike; `workflow_status` stays read-only; `modules.handoffDoc:
+  false` still means no file. A project that never entered `HANDOFF` gets no file.
+- **`docs/HANDOFF-STATE.md`** (new, tracked) records what the machine cannot: why work stopped, what
+  was deliberately left stale, the unfixed minors, the open decisions. It is never declared in a
+  review, so writing it costs one commit and no re-review (constraint C002, and a test asserts the
+  property over this repository's own evidence).
+
+`package.json` is now **0.4.0**.
 
 ---
 

@@ -40,12 +40,20 @@ import {
 import {
   FEATURES_RELATIVE_PATH,
   fingerprint,
+  readState,
+  refreshHandoffDoc,
   writeFeatures,
   writeState,
 } from '../lib/advance.js'
 import { validateWorkUnitId } from '../lib/work-unit.js'
 import { resolveConfig } from '../lib/config.js'
-import { buildAdvanceToolDefinition, buildToolDefinition, renderAdvance, renderStatus } from '../lib/tools.js'
+import {
+  buildAdvanceToolDefinition,
+  buildReviewToolDefinition,
+  buildToolDefinition,
+  renderAdvance,
+  renderStatus,
+} from '../lib/tools.js'
 
 /** A project directory with the opt-in file (its presence is what activates the workflow). */
 function makeProject({ config = 'tier: standard\n' } = {}) {
@@ -128,6 +136,41 @@ function seedProject(dir, featureList, { phase = 'COMMIT', featureId = featureLi
 }
 
 const toolOptions = () => ({ config: resolveConfig({}), ctx: null, services: null })
+
+/**
+ * A review tool whose reviewer always completes with a passing report.
+ *
+ * `record-review` only consumes a verdict the framework itself recorded, so a test of the
+ * post-HANDOFF refresh needs a review that really runs through the tool.
+ */
+function reviewRig(options, exec) {
+  const reviewDef = buildReviewToolDefinition(options)
+  const reviewExec = {
+    ...exec,
+    subagents: {
+      start: async () => ({
+        result: Promise.resolve({
+          stopReason: 'completed',
+          structured: {
+            perDimension: [
+              'correctness',
+              'build',
+              'tests',
+              'regressions',
+              'archFit',
+              'legibility',
+              'scope',
+            ].map(dimension => ({ dimension, score: 9, rationale: '' })),
+            issues: [],
+          },
+          output: [],
+        }),
+        dispose: async () => {},
+      }),
+    },
+  }
+  return { reviewDef, reviewExec }
+}
 
 /**
  * A project with one FRESH complete feature, one STALE complete feature, one OPEN feature with
@@ -644,4 +687,137 @@ test('entering HANDOFF through the tool writes the brief for an unreviewed, waiv
   } finally {
     cleanup(dir)
   }
+})
+
+// ---------------------------------------------------------------------------
+// the brief must not go stale after HANDOFF
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT THIS PINS was measured: the brief was written only as the project ENTERED HANDOFF,
+// and HANDOFF is terminal — so every later `record-review` left the file saying "7/8 complete"
+// and six stale records while the state said 8/8 and five. A document whose numbers describe a
+// past state is worse than no document: the next session reads it first.
+
+test('refreshHandoffDoc writes an existing brief, creates none, and honours the switch', async () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'let a = 1\n', 'utf8')
+    const state = stateDoc({ phase: 'HANDOFF' })
+    const features = { features: [feature('F001', { passes: true, evidence: [reviewRow(dir, ['a.js'])] })] }
+    const options = {
+      projectDir: dir,
+      workUnit: null,
+      state,
+      features,
+      constraints: { constraints: [] },
+      modules: {},
+    }
+
+    const absent = await refreshHandoffDoc(options)
+    assert.equal(absent.status, 'absent', 'a project that never entered HANDOFF gets no file')
+    assert.equal(existsSync(join(dir, HANDOFF_DOC_RELATIVE_PATH)), false)
+
+    assert.equal(writeHandoffDoc(options).written, true)
+    const before = readFileSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), 'utf8')
+
+    const refreshed = await refreshHandoffDoc({ ...options, state: { ...state, updated_at: '2026-11-02T00:00:00.000Z' } })
+    assert.equal(refreshed.status, 'written', JSON.stringify(refreshed))
+    const after = readFileSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), 'utf8')
+    assert.notEqual(after, before, 'the refreshed brief describes the new state')
+    assert.match(after, /- generated: 2026-11-02T00:00:00\.000Z/)
+
+    const off = await refreshHandoffDoc({ ...options, modules: { handoffDoc: false } })
+    assert.equal(off.status, 'disabled')
+    assert.equal(readFileSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), 'utf8'), after, 'off means no write')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('record-review in HANDOFF rewrites the brief, so its counts stop describing the past', async () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'let a = 1\n', 'utf8')
+    writeFileSync(join(dir, 'b.js'), 'let b = 1\n', 'utf8')
+    seedProject(
+      dir,
+      [feature('F001', { passes: true, evidence: [reviewRow(dir, ['a.js'])] }), feature('F002')],
+      { phase: 'COMMIT' },
+    )
+    const options = toolOptions()
+    const def = buildAdvanceToolDefinition(options)
+    // F002 is deliberately left open, so the move needs a waiver — the same shape the real
+    // session used when it entered HANDOFF with work outstanding.
+    const entered = await def.execute(
+      { action: 'advance', to: 'HANDOFF', waive_open_features: true, waiver_reason: 'deliberately unfinished' },
+      execFor(dir),
+    )
+    assert.equal(entered.ok, true, JSON.stringify(entered))
+    const briefBefore = readFileSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), 'utf8')
+    assert.match(briefBefore, /- features: 1\/2 complete, 1 open/)
+
+    const { reviewDef, reviewExec } = reviewRig(options, execFor(dir))
+    await reviewDef.execute({ feature: 'b', changed_files: ['b.js'] }, reviewExec)
+    const applied = await def.execute({ action: 'record-review', feature_id: 'F002' }, execFor(dir))
+    assert.equal(applied.ok, true, JSON.stringify(applied))
+    assert.equal(applied.handoffDoc?.status, 'written', 'the state write must refresh the brief')
+
+    const briefAfter = readFileSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), 'utf8')
+    assert.match(briefAfter, /- features: 2\/2 complete, 0 open/)
+    assert.match(briefAfter, /- \[x\] F002 — complete/)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a failed brief write is reported on the move, never turned into a refused transition', async () => {
+  const dir = makeProject()
+  try {
+    writeFileSync(join(dir, 'a.js'), 'let a = 1\n', 'utf8')
+    seedProject(dir, [feature('F001', { passes: true, evidence: [reviewRow(dir, ['a.js'])] })], { phase: 'COMMIT' })
+    // A DIRECTORY at the target path makes the rename fail, which is the only portable way to
+    // force the write error this test is about.
+    mkdirSync(join(dir, HANDOFF_DOC_RELATIVE_PATH), { recursive: true })
+
+    const def = buildAdvanceToolDefinition(toolOptions())
+    const moved = await def.execute({ action: 'advance', to: 'HANDOFF' }, execFor(dir))
+    assert.equal(moved.ok, true, 'the phase machine does not own the documentation file')
+    assert.equal(moved.phase, 'HANDOFF')
+    assert.equal(moved.handoffDoc?.status, 'failed')
+    assert.match(String(moved.handoffDoc?.reason ?? ''), /could not be written/)
+    assert.equal(readState(dir).state.phase, 'HANDOFF', 'the transition itself is persisted')
+  } finally {
+    cleanup(dir)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// the tracked state document is never declared in a review (C002)
+// ---------------------------------------------------------------------------
+//
+// WHY A DATA TEST AND NOT A PROSE RULE. `docs/HANDOFF-STATE.md` is prose a human or agent
+// writes at the end of a session; no test can police its content. What IS mechanical is the
+// property that makes it cheap: it must never appear in a recorded review's `changed_files`.
+// Staleness is caused by the FINGERPRINT, which covers only declared files, so declaring the
+// document would stale every feature the moment the document was written — the exact trap the
+// document exists to avoid. This asserts the property over the repository's own evidence.
+
+test('no recorded review declares docs/HANDOFF-STATE.md (C002)', () => {
+  const featuresPath = new URL('../.dsh/FEATURES.json', import.meta.url)
+  // A checkout without workflow state has nothing to assert; the rule is about recorded evidence.
+  if (!existsSync(featuresPath)) return
+  const document = JSON.parse(readFileSync(featuresPath, 'utf8'))
+  const declared = []
+  for (const feature of Array.isArray(document?.features) ? document.features : []) {
+    for (const row of Array.isArray(feature?.evidence) ? feature.evidence : []) {
+      if (row === null || typeof row !== 'object' || row.type !== 'review') continue
+      for (const file of Array.isArray(row.files) ? row.files : []) declared.push(String(file))
+    }
+  }
+  assert.equal(
+    declared.some(file => file === 'docs/HANDOFF-STATE.md' || file.endsWith('/HANDOFF-STATE.md')),
+    false,
+    'the session-end state document must never be declared in a review: declaring it would stale ' +
+      'every feature whose review covered it',
+  )
 })

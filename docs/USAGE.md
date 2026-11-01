@@ -146,11 +146,15 @@ document and is never touched. `.dsh/` is the workflow's directory (gitignored),
 brief never appears in `git status` and can never be declared as a reviewed file. Do not hand-edit
 it — it is generated from the state.
 
-**It is a snapshot, not a live view.** The brief is written when the project ENTERS `HANDOFF`, and
-`HANDOFF` is terminal, so nothing regenerates it afterwards: reviews recorded later do not change the
-file, and its FRESH/STALE labels can therefore be out of date. Read `workflow_status` for the current
-freshness; the status line also prints the file's modification time, so you can see how old the
-snapshot is.
+**It is regenerated on every state write, so it is not frozen at `HANDOFF`.** Entering `HANDOFF`
+writes it, and every later write of `.dsh/WORKFLOW.json` — a phase move, or `workflow_advance
+action=record-review` — rewrites it from the state that was just persisted. `HANDOFF` is terminal, so
+record-review is the write that matters in practice: a brief written once on entry described a past
+state (measured: 7/8 complete and six stale while the state said 8/8 and five). `workflow_status`
+stays read-only by contract and does not regenerate anything; it reports the file's modification
+time, so you can still see how fresh it is. A project that never entered `HANDOFF` has no brief, and
+nothing creates one early. Its FRESH/STALE labels are the same recheck `workflow_status` uses, and
+the file carries the same judgement of which stale records owe a re-review.
 
 ---
 

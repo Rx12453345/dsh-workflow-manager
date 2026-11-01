@@ -32,6 +32,7 @@ import {
   harnessesForDepth,
   discoverMutationHarnesses,
   renderIsolation,
+  boundedReviewIssues,
 } from '../lib/review.js'
 import { buildReviewToolDefinition } from '../lib/tools.js'
 import {
@@ -2817,4 +2818,57 @@ test('the contaminated report names the two doubt buckets, not "unchanged"', () 
   assert.match(text, /possibly changed 1/)
   assert.match(text, /unverifiable 1/)
   assert.equal(text.includes('unchanged'), false, 'a doubt bucket is never reported as unchanged')
+})
+
+// ---------------------------------------------------------------------------
+// the reviewer's findings, bounded, as the evidence row persists them
+// ---------------------------------------------------------------------------
+//
+// WHY THIS IS PINNED. The evidence row used to record the SCORE and the FILE LIST and nothing
+// about what the reviewer actually complained about, so a new session could see "PASS 9.29 over
+// these 15 files" and be blind to three unfixed minors. The summary is bounded because
+// FEATURES.json is read on every status call.
+
+test('boundedReviewIssues keeps the most consequential findings and says how many it dropped', () => {
+  const issues = [
+    { what: 'A minor thing.', severity: 'minor', dimension: 'legibility', reachable: false },
+    { what: 'A blocker.\nWith a newline.', severity: 'blocker', dimension: 'correctness', reachable: true },
+    { what: 'A major thing. Second sentence is noise.', severity: 'major', dimension: 'build', reachable: false },
+  ]
+  const summary = boundedReviewIssues(issues)
+  assert.equal(summary.issues.length, 3)
+  // ORDER IS BY CONSEQUENCE, so truncation can never drop the blocker that was written last.
+  assert.deepEqual(
+    summary.issues.map(issue => issue.severity),
+    ['blocker', 'major', 'minor'],
+  )
+  // ONLY THE FIRST SENTENCE, flattened: the title is a summary, not the reviewer's prose.
+  assert.equal(summary.issues[0].title, 'A blocker.')
+  assert.equal(summary.issues[1].title, 'A major thing.')
+  assert.equal(summary.issues[0].reachable, true)
+  assert.equal(summary.issues[0].dimension, 'correctness')
+
+  const many = Array.from({ length: 14 }, (_, index) => ({
+    what: `finding ${index}`,
+    severity: index === 13 ? 'blocker' : 'minor',
+    dimension: 'correctness',
+    reachable: true,
+  }))
+  const bounded = boundedReviewIssues(many)
+  assert.equal(bounded.issues.length, 10)
+  assert.equal(bounded.issuesTotal, 14, 'a truncated list says how many findings existed')
+  assert.equal(bounded.issues[0].severity, 'blocker', 'the blocker survives the cap')
+})
+
+test('boundedReviewIssues treats malformed findings as none, and never throws', () => {
+  for (const value of [undefined, null, 'not a list', 42, { issues: [] }, [null, 7, []], [{ what: 5 }]]) {
+    assert.doesNotThrow(() => boundedReviewIssues(value))
+  }
+  assert.deepEqual(boundedReviewIssues('not a list'), { issues: [] })
+  assert.deepEqual(boundedReviewIssues([]), { issues: [] })
+  // An ENTRY with no usable text still records the finding, with an explicit placeholder: a
+  // dropped issue is worse than one whose title could not be read.
+  const empty = boundedReviewIssues([{ severity: 'minor', dimension: 'scope', reachable: false }])
+  assert.equal(empty.issues.length, 1)
+  assert.match(empty.issues[0].title, /no text/)
 })
