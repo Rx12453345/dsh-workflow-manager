@@ -1551,10 +1551,10 @@ test('exactly ONE row carries the configuration page, and the switch survives on
 
 test('the panel row\'s patch values match the runtime defaults', () => {
   // `run-config-check.mjs` walks the CORE row's patch block only, so the panel row's
-  // three presentation fields were outside every guard — and those are exactly the
-  // values the gate and the label consume when the profile patch carries no override.
-  // Parsed from the shipped patch, and compared with `DEFAULT_CONFIG`, so a divergence
-  // between the two layers fails here instead of only on a machine with no override.
+  // presentation fields were outside every guard — and those are exactly the values the
+  // gate and the label consume when the profile patch carries no override. Parsed from
+  // the shipped patch, and compared with `DEFAULT_CONFIG`, so a divergence between the
+  // two layers fails here instead of only on a machine with no override.
   const patch = readFileSync(join(REPO, 'cordis.patch.yml'), 'utf8')
   const panelRow = patch.slice(patch.indexOf('src-12453345_-dsh-workflow/panel'))
   assert.ok(panelRow.length > 0, 'the panel row left cordis.patch.yml')

@@ -51,6 +51,11 @@ but not the reason for it.
   was deliberately left stale, the unfixed minors, the open decisions. It is never declared in a
   review, so writing it costs one commit and no re-review (constraint C002, and a test asserts the
   property over this repository's own evidence).
+- **Removed: `showInPluginPage`.** The panel row declared this switch, `DEFAULT_CONFIG` defaulted it
+  to `true`, and `cordis.patch.yml` annotated it as unread — it never gated anything and could not:
+  the plugin-list page belongs to the host, so a plugin-side boolean has nothing to act on. It is
+  gone from the patch row, the schema, the defaults, the panel module's comment and the regression
+  that pinned the row's scalars. `showInSidebar` and `sidebarLabel` are unchanged.
 
 `package.json` is now **0.4.0**.
 
