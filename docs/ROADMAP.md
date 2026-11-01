@@ -50,8 +50,8 @@ against `git status` — RESOLVED (2026-10-25)" below.
 ## Unverified
 
 Items implemented and, at the time of writing, not exercised on a real host. Listed because
-"unverified is not broken, but unverified means you do not know". The subsection on the three UI
-surfaces below now carries a dated partial verification; the rest has not been exercised.
+"unverified is not broken, but unverified means you do not know". The three UI surfaces and the
+`verification.policy` path below carry a dated, partial verification; the rest has not been exercised.
 
 **Verified on a real host on 2026-11-01 — the coarse walk-through only.** After deploying 0.4.0 and
 restarting, a human walked five checks and reported all of them correct: the settings page rendered
@@ -61,17 +61,18 @@ and showed a sane icon; switching `showInSidebar` off withdrew the entry **and**
 page switched it back on; and the conversation tab rendered per project, including the "not opted in"
 message for a project without `.dsh/workflow.yml`. The `showInPluginPage` removal was confirmed on the
 same pass: the panel row no longer offers it and the tab's config table no longer lists it. The three
-UI mutation harnesses also ran in a normal terminal: `client` **14/14**, `panel` **28/28**,
-`project-tab` **58/58** caught, with `missed 0`, `not run 0`, `apply-failed 0`, `partial 0` and
-sources restored byte-for-byte (exit 0) — the counts they had never produced, because the sandbox
-cannot start the browser.
+UI mutation harnesses also ran in a normal terminal, and printed the same shape the sandbox cannot
+produce: `client` **caught 14**, `panel` **caught 28**, and `project-tab` **caught 57/57 killable
+mutants (58 defined, 1 declared behaviourally equivalent, 0 missed)** — with `partial 0`,
+`not run 0`, `apply-failed 0` and sources restored byte-for-byte (exit 0). Those are the counts the
+sandbox had never produced, because it cannot start the browser.
 **What that does NOT cover.** The granular checklists below — the 11-item layout walk (divider widths,
-760 px cap, badge wrapping, the two-column settings page, the warning banner, console errors), the
-9-item tab walk (`approval: nope`'s fail-closed display, `evaluator.bar: abc`'s warning, the
-subscription refresh without a reload, the layer badges), the `whileServed` ordering, cross-talk
-between the two `configForms` pages, and live withdrawal at runtime — were not individually walked.
-"The surfaces exist, read correctly and the switches work" is now known; "every layout item on the
-checklists is right" is still not.
+the two-column settings page, the warning banner, console errors), the 9-item tab walk
+(`approval: nope`'s fail-closed display, `evaluator.bar: abc`'s warning, the subscription refresh
+without a reload, the layer badges, the 760 px cap, badge wrapping), the `whileServed` ordering,
+cross-talk between the two `configForms` pages, and live withdrawal at runtime — were not individually
+walked. "The surfaces exist, read correctly and the switches work" is now known; "every layout item on
+the checklists is right" is still not.
 
 ### The sidebar panel rendering (B6)
 The entry on `sidebar.panellist` and the body on the root-scoped `main` slot are registered from the
@@ -97,22 +98,23 @@ The two-column defect is fixed and its geometry is measured in a real engine (he
 `0px 244px` before, `264px` after). The deployment history is in CHANGELOG.md, and what is installed
 right now is a `node tooling/sync-to-profile.mjs --check` question this page deliberately does not
 answer. The page **was** opened once on a real host on 2026-11-01 (the sidebar walk-through above saw
-it render single-column), but the 11 items were not checked one by one — what has no recorded result is
-that itemised walk:
+it render single-column), and one item of the list was seen as part of that walk — the sidebar switch
+can be turned back on from Settings → Plugins. What has no recorded result is the itemised remainder:
 The checklist is NEXT-STEPS.md:2808–2820: label no longer wraps per character; single column; full-width
 row dividers; left-aligned and ≤520 px; looser row gap; the settings page **still** two-column with a
 200 px label column (the control group); the `llm-only` warning banner full width; the tab shows the
 three new "why no editor" sections; the tab has **no** editable control; the sidebar switch can be
-turned back on from Settings → Plugins; no `[dsh-workflow]` error in the console.
+turned back on from Settings → Plugins (seen, above); no `[dsh-workflow]` error in the console.
 Whether the dividers and 16 px spacing look *good* is an aesthetic judgement no measurement reaches.
 
 ### The project tab manual checklist — 9 items
 The "actual effective configuration" view renders by answer-first-then-raw-text, with a per-row layer
 badge. Its logic is covered by differential tests (the host's own functions vs the browser mirror) and
-P1–P57 mutants all caught. **The rendering was seen once, on 2026-11-01** (the verification paragraph
-at the top of this section): the tab appears per conversation, renders the effective configuration for
-this project, and shows "not opted in" (never an empty table) for a project without
-`.dsh/workflow.yml`. The other eight items were not individually walked:
+its 58 mutants are accounted for: **57 caught, P10 declared behaviourally equivalent** (removing the CR
+strip cannot change that function's output). **The rendering was seen once, on 2026-11-01** (the
+verification paragraph at the top of this section): the tab appears per conversation, renders the
+effective configuration for this project, and shows "not opted in" (never an empty table) for a project
+without `.dsh/workflow.yml`. The other eight items were not individually walked:
 Checklist (NEXT-STEPS.md:3164–3179): first screen is the effective config, not the file text; in this
 project `tier: standard` shows **本工程覆盖** and `approval.riskThreshold: medium` shows
 **继承自默认值**; the overview counts equal the table's row counts; "re-read" follows the file; changing
@@ -367,9 +369,10 @@ in `test/mutation-verdict.test.mjs`.
 
 **What still needs a human.** The end-to-end proof needs a real browser, and the sandbox cannot start
 one: an in-sandbox run is **NOT RUN** (exit 2, never a pass). That proof was produced once, on
-**2026-11-01**, in a normal terminal with a Chromium-family browser: client **14/14**, panel **28/28**,
-project-tab **58/58** caught, with `missed 0`, `not run 0`, `apply-failed 0`, `partial 0` and sources
-restored byte-for-byte (exit 0). Those counts are measured, not pending; they are also a dated result,
+**2026-11-01**, in a normal terminal with a Chromium-family browser: client **caught 14**, panel
+**caught 28**, project-tab **caught 57/57 killable mutants** (58 defined, 1 declared behaviourally
+equivalent, 0 missed), with `not run 0`, `apply-failed 0`, `partial 0` and sources restored
+byte-for-byte (exit 0). Those counts are measured, not pending; they are also a dated result,
 not a standing guarantee, so every future run still needs that terminal. The other harnesses run
 in-sandbox through the file-backed child capture — including `mutation-check-isolation.mjs` (added
 2026-11-01 for the review fence) and `mutation-check-state.mjs` (added 2026-11-01 for the recorded
@@ -401,8 +404,9 @@ today, because `lib/config-schema.js` defaults all four approval fields.
 ### `run-config-check.mjs` only walks the core row's patch block
 The panel row's two patch values (`showInSidebar`, `sidebarLabel`) were not checked by the existing
 tool. A `test/status.test.mjs` comparison against `DEFAULT_CONFIG` substitutes as a guard.
-**What it would take.** Teaching `run-config-check.mjs` about all three rows; the tool was out of scope
-in the round that added the panel.
+**What it would take.** Teaching `run-config-check.mjs` about the core and panel rows (the module row
+carries only `rowKind`, so there is nothing to compare there); the tool was out of scope in the round
+that added the panel.
 
 ### `test/review.test.mjs` mid-round flakiness
 Mid-round, 8 failures appeared there (`493 / 484 / 8 / 1`) while another agent was editing `lib/review.js`

@@ -243,10 +243,11 @@ start a captured child — `mutation-check-approval.mjs`, `mutation-check-verifi
 includes the Chromium layout measurement. They spawn the test file directly (not through
 `run-unit-tests.mjs`) and do not set `DSH_WORKFLOW_SANDBOX`, so an in-sandbox run reaches the
 browser launch, which the sandbox cannot complete.
-**They were run once on a real host (2026-11-01)**: client **14/14**, panel **28/28**, project-tab
-**58/58** caught, `missed 0`, `not run 0`, `apply-failed 0`, `partial 0`, sources restored
-byte-for-byte, exit 0. That is a dated result, not a standing guarantee — the next in-sandbox run
-prints `NOT RUN` and exit 2 again.
+**They were run once on a real host (2026-11-01)**: `client` caught **14**, `panel` caught **28**,
+`project-tab` caught **57/57 killable mutants** (58 defined, 1 declared behaviourally equivalent,
+0 missed) — with `partial 0`, `not run 0`, `apply-failed 0`, sources restored byte-for-byte, exit 0.
+That is a dated result, not a standing guarantee — the next in-sandbox run prints `NOT RUN` and
+exit 2 again.
 
 **A red baseline is not evidence (P3-3).** The three harnesses run the unmutated baseline FIRST and
 classify it through `tooling/mutation-verdict.mjs`. A baseline that cannot produce a verdict — red
@@ -260,12 +261,13 @@ the caught count; the browser failure is reported separately and excluded.
 **The end-to-end proof needs a normal terminal — and has been produced once there.** The classifier
 is pinned without a browser by `test/mutation-verdict.test.mjs`, but whether a real browser run still
 catches the mutants can only be measured in a normal terminal with a Chromium-family browser. That
-measurement exists: on **2026-11-01** the three harnesses ran there and reported client **14/14**,
-panel **28/28**, project-tab **58/58** caught with `missed 0`, `not run 0`, `apply-failed 0`,
-`partial 0` and sources restored byte-for-byte (exit 0). It is a dated result, not a standing
-guarantee: an in-sandbox run is still **NOT RUN** (exit 2) and says nothing about the rendered layout,
-and every future run needs that terminal again. The remaining, unwalked checks are tracked in
-[ROADMAP.md](ROADMAP.md) §"The sidebar panel rendering (B6)" and §"The project tab manual checklist".
+measurement exists: on **2026-11-01** the three harnesses ran there and reported `client` caught 14,
+`panel` caught 28 and `project-tab` caught 57/57 killable mutants (58 defined, 1 declared behaviourally
+equivalent), with `partial 0`, `not run 0`, `apply-failed 0` and sources restored byte-for-byte
+(exit 0). It is a dated result, not a standing guarantee: an in-sandbox run is still **NOT RUN**
+(exit 2) and says nothing about the rendered layout, and every future run needs that terminal again.
+The remaining, unwalked checks are tracked in [ROADMAP.md](ROADMAP.md) §"The sidebar panel rendering
+(B6)" and §"The project tab manual checklist".
 
 > ⚠️ **Never run two of these concurrently.** They rewrite files under `lib/`. Two at once on
 > `lib/client.js` once left **two mutants permanently in the source tree while both processes printed
@@ -476,8 +478,10 @@ Open **Plugins → dsh-workflow → `dsh-workflow-core` → configuration**:
 ### 4.7 The conversation tab and the sidebar panel
 
 The render-dependent surfaces, with item-by-item checklists kept in [ROADMAP.md](ROADMAP.md) under
-"Unverified". Read them there and walk them on a real host; **they are not yet verified**, and do not
-record them as passed on the strength of the offline evidence.
+"Unverified". A **coarse walk-through** is recorded there (2026-11-01: the settings rows, the sidebar
+entry/body/recovery path and the conversation tab were seen on a real host), so the surfaces are known
+to exist and render; **the item-by-item checklists are not yet verified**, and do not record an
+individual item as passed on the strength of the offline evidence.
 
 ---
 
