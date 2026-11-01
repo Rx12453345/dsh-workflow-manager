@@ -114,7 +114,11 @@ INIT → PLAN → PICK → NEGOTIATE → BUILD → VERIFY → EVALUATE → COMMI
 ### The handoff brief: `.dsh/HANDOFF.md`
 
 When a project **enters `HANDOFF`**, the framework writes a short markdown brief to
-`.dsh/HANDOFF.md` — the document that lets the next session start cold. It names:
+`.dsh/HANDOFF.md` — the document that lets the next session start cold. When the move names a
+`work_unit`, the same brief is written to `.dsh/work/<id>/HANDOFF.md` instead: the content is
+rendered from that unit's state, so one project-level file would let two units overwrite each
+other, and `workflow_status work_unit=A` would pair A's counts with B's file. Neither unit touches
+the project-level brief. The brief names:
 
 - the phase and the feature counts;
 - **every feature**, with pass/fail and whether its recorded review still covers the files on disk
@@ -124,6 +128,11 @@ When a project **enters `HANDOFF`**, the framework writes a short markdown brief
   waiver that was recorded (if any);
 - the **open constraints** (`id`, rule, status) and their retirement conditions;
 - the **next legal moves** the phase machine allows.
+
+`workflow_advance` is what enforces those blockers; the brief only reports how they apply now. A
+`STALE` line is therefore a **report of the refusal you would get**: `HANDOFF` itself refuses a
+stale review, so you see the line when you read the file (or `workflow_status`) *before* attempting
+the move — it is not a state the normal path reaches.
 
 `workflow_status` prints a bounded summary of the same builder — the path with its size and
 modification time, the complete / open / stale counts, and one next action. The full brief is on

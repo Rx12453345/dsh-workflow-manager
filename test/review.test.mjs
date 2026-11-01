@@ -1984,9 +1984,13 @@ test('harness selection follows the depth, not a hardcoded list', () => {
   assert.ok(depth1.covering.length > 1, 'the other client harnesses must still be listed as covering')
 
   const depth2 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESSES, files: ['lib/tools.js'] })
+  // `mutation-check-handoff.mjs` is a covering harness for lib/tools.js because it injects the
+  // dropped-stale-count defect into the status summary; discovery reads that from its mutants, so
+  // the new harness is required here rather than silently omitted.
   assert.deepEqual(depth2.required, [
     'mutation-check-approval.mjs',
     'mutation-check-governance.mjs',
+    'mutation-check-handoff.mjs',
     'mutation-check-verification.mjs',
     'mutation-check-work-unit.mjs',
   ])

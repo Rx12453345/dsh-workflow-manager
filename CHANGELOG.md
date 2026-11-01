@@ -34,10 +34,10 @@ implements the document its name promises.
   `COMMIT`/`HANDOFF` would enforce, the open constraints and the next legal moves — and writes it to
   `.dsh/HANDOFF.md` when the project **enters `HANDOFF`** (`enterHandoff` in `lib/advance.js`).
 - **The target is `.dsh/HANDOFF.md`, never the repository's tracked root `HANDOFF.md`** (the
-  incident brief). The path is a constant, not a parameter, and `assertHandoffDocTarget` refuses
-  anything whose name is not `HANDOFF.md` directly under the project's `.dsh` directory. `.dsh/` is
-  gitignored here, so the generated file never appears in `git status`, never enters a diff and can
-  never be declared in a review's `changed_files`.
+  incident brief). The path is derived, never passed as a caller argument, and
+  `assertHandoffDocTarget` refuses anything whose name is not `HANDOFF.md` directly under the
+  scope's workflow directory. `.dsh/` is gitignored here, so the generated file never appears in
+  `git status`, never enters a diff and can never be declared in a review's `changed_files`.
 - **Regeneration is byte-idempotent.** The timestamp line defaults to the state's `updated_at`
   instead of "now", so the same state renders the same bytes; the file is replaced, never appended.
 - **The switch is honoured.** `modules.handoffDoc: false` writes no file **and** removes the
@@ -49,6 +49,35 @@ implements the document its name promises.
   target, the idempotent rewrite, the bounded status section with counts matching the state, and a
   project with no review evidence. A failing write is reported in the `workflow_advance` reply
   rather than turning a legal `HANDOFF` move into a failure.
+
+### Fixed — the p3-7 review's recorded debt in the handoff brief
+
+The review PASSed the feature and recorded four defects as debt; each is now fixed in place, with
+a regression test that can go red:
+
+- **The work unit was not in the path, only in the content** (major, reachable). Two units entering
+  `HANDOFF` overwrote the same `.dsh/HANDOFF.md`, and `workflow_status work_unit=A` then paired A's
+  counts with B's file. A named unit now writes `.dsh/work/<id>/HANDOFF.md`, derived from the
+  project's work-unit validator (an id such as `../x` is refused, not sanitised, and the resolved
+  path is containment-checked inside `.dsh/work`). `workUnit` is threaded through the target
+  computation, the writer, `readHandoffDocStatus` and `buildStatus`; the brief's own header names
+  the file it is. Two new tests: a two-unit canary proving separate files, separate counts and an
+  untouched project-level path, and an escape test naming the refusing layer.
+- **`phase` was interpolated unflattened** (minor, unreachable) in the metadata line — and in the
+  next-moves line — so a hand-edited `WORKFLOW.json` could forge brief structure with a newline.
+  Both are `oneLine`d now; a test with a newline-bearing phase proves no second markdown line.
+- **Waiver `openFeatures` ids were joined unflattened** (minor, unreachable) while the OPEN blocker
+  line flattened its ids. They are flattened consistently now; a test with a newline-bearing id
+  proves the waiver line stays one line.
+- **`docs/USAGE.md` overstated the STALE blocker section**: the shipped path never shows the brief
+  in that state, because `HANDOFF` refuses a stale review before it writes. The docs now say the
+  line is a report of the refusal `workflow_advance` would give, seen by reading the file (or
+  `workflow_status`) **before** attempting the move.
+- **`tooling/mutation-check-handoff.mjs` (new)** closes the harness gap the review named: it
+  injects the eight defects above (switch, root-brief target, append-instead-of-replace, dropped
+  stale count, dropped OPEN line, project-level path for a unit, unflattened phase, unflattened
+  waiver id), runs `test/handoff.test.mjs` after each literal edit, and restores `lib/` byte-for-byte
+  under the shared mutation lock. 8/8 caught.
 
 ### Fixed — a browser-only red counted as a caught mutant in the three UI harnesses
 

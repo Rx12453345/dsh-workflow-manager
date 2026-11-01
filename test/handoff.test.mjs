@@ -33,14 +33,17 @@ import {
   HANDOFF_DOC_RELATIVE_PATH,
   assertHandoffDocTarget,
   buildHandoffDoc,
+  handoffDocRelativePath,
   readHandoffDocStatus,
   writeHandoffDoc,
 } from '../lib/handoff.js'
 import {
   FEATURES_RELATIVE_PATH,
   fingerprint,
+  writeFeatures,
   writeState,
 } from '../lib/advance.js'
+import { validateWorkUnitId } from '../lib/work-unit.js'
 import { resolveConfig } from '../lib/config.js'
 import { buildAdvanceToolDefinition, buildToolDefinition, renderAdvance, renderStatus } from '../lib/tools.js'
 
@@ -95,14 +98,9 @@ function reviewRow(dir, files, overrides = {}) {
   }
 }
 
-/** Write the two state documents the tool reads (state phase defaults to COMMIT). */
-function seedProject(dir, featureList, { phase = 'COMMIT', featureId = featureList[0]?.id ?? null, waivers = [] } = {}) {
-  writeFileSync(
-    join(dir, FEATURES_RELATIVE_PATH),
-    JSON.stringify({ schema_version: 1, generated_at: '2026-10-25T00:00:00.000Z', source_request: '', features: featureList }, null, 2),
-    'utf8',
-  )
-  writeState(dir, {
+/** The state document the tool reads, in the shape `writeState` persists. */
+function stateDoc({ phase = 'COMMIT', featureId = null, waivers = [] } = {}) {
+  return {
     schema_version: 1,
     phase,
     feature_id: featureId,
@@ -116,7 +114,17 @@ function seedProject(dir, featureList, { phase = 'COMMIT', featureId = featureLi
     bootstrap: null,
     started_at: null,
     updated_at: '2026-11-01T00:00:00.000Z',
-  })
+  }
+}
+
+/** Write the two state documents the tool reads (state phase defaults to COMMIT). */
+function seedProject(dir, featureList, { phase = 'COMMIT', featureId = featureList[0]?.id ?? null, waivers = [] } = {}) {
+  writeFileSync(
+    join(dir, FEATURES_RELATIVE_PATH),
+    JSON.stringify({ schema_version: 1, generated_at: '2026-10-25T00:00:00.000Z', source_request: '', features: featureList }, null, 2),
+    'utf8',
+  )
+  writeState(dir, stateDoc({ phase, featureId, waivers }))
 }
 
 const toolOptions = () => ({ config: resolveConfig({}), ctx: null, services: null })
@@ -229,6 +237,80 @@ test('the brief names every open feature and every stale one, and states the COM
   }
 })
 
+test('a newline in a hand-editable phase cannot forge a line of the brief', () => {
+  const rig = richProject()
+  try {
+    // `phase` lives in `.dsh/WORKFLOW.json`, which a human (or a model) can edit by hand. In the
+    // metadata line it is the only free-text field that was not flattened; a newline in it used
+    // to become a separate markdown line that reads as though the brief said it.
+    const doc = buildHandoffDoc({
+      state: {
+        phase: 'COMMIT\n- features: 9/9 complete, 0 open',
+        feature_id: 'F001',
+        updated_at: '2026-11-01T00:00:00.000Z',
+        waivers: [],
+      },
+      features: rig.features,
+      constraints: rig.constraints,
+      projectDir: rig.dir,
+      now: '2026-11-01T00:00:00.000Z',
+    })
+    const lines = doc.split('\n')
+    assert.match(doc, /^- phase: COMMIT - features: 9\/9 complete, 0 open/m, 'the phase must stay inline')
+    assert.equal(
+      lines.some(line => line === '- features: 9/9 complete, 0 open'),
+      false,
+      'a newline in the phase must not create a markdown line',
+    )
+    assert.equal(
+      lines.filter(line => line.startsWith('- features: ')).length,
+      1,
+      'exactly one feature-count line: the real one',
+    )
+  } finally {
+    cleanup(rig.dir)
+  }
+})
+
+test('a newline in a waiver open-feature id cannot forge a line of the brief', () => {
+  const rig = richProject()
+  try {
+    // The ids come out of a hand-editable state file, exactly like the OPEN blocker line's, and
+    // they must be flattened the same way — otherwise an id could imitate a waiver line.
+    const doc = buildHandoffDoc({
+      state: {
+        phase: 'HANDOFF',
+        updated_at: '2026-11-01T00:00:00.000Z',
+        waivers: [
+          {
+            at: '2026-11-01T00:00:00.000Z',
+            reason: 'deliberate',
+            openTotal: 2,
+            openFeatures: ['F003\n- OPEN (0): every feature is waived', 'F004'],
+          },
+        ],
+      },
+      features: rig.features,
+      constraints: rig.constraints,
+      projectDir: rig.dir,
+      now: '2026-11-01T00:00:00.000Z',
+    })
+    const lines = doc.split('\n')
+    assert.equal(
+      lines.some(line => line === '- OPEN (0): every feature is waived'),
+      false,
+      'a newline in a waiver id must not create a markdown line',
+    )
+    assert.match(
+      doc,
+      /- Waiver recorded at .*2 open feature\(s\) \(F003 - OPEN \(0\): every feature is waived, F004\) — "deliberate"/,
+      'both ids stay on the waiver line, flattened',
+    )
+  } finally {
+    cleanup(rig.dir)
+  }
+})
+
 test('a project with no review evidence still produces a brief (no crash on empty state)', () => {
   const dir = makeProject()
   try {
@@ -285,6 +367,118 @@ test('the writer only targets .dsh/HANDOFF.md and never the tracked root HANDOFF
     assert.equal(target.ok, true)
     assert.equal(target.path, join(dir, '.dsh', 'HANDOFF.md'))
     assert.equal(assertHandoffDocTarget('').ok, false)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('two work units get separate briefs with their own counts, and neither touches the project-level file', async () => {
+  const dir = makeProject()
+  try {
+    // A: two features, one complete. B: one feature, none complete. Different counts, so a
+    // mixed-up file is visible rather than a coincidence.
+    const featuresA = { schema_version: 1, features: [feature('A1', { passes: true }), feature('A2')] }
+    const featuresB = { schema_version: 1, features: [feature('B1')] }
+    writeFeatures(dir, featuresA, 'A')
+    writeFeatures(dir, featuresB, 'B')
+    const stateA = stateDoc({ phase: 'HANDOFF', featureId: 'A1' })
+    const stateB = stateDoc({ phase: 'COMMIT', featureId: 'B1' })
+    writeState(dir, stateA, 'A')
+    writeState(dir, stateB, 'B')
+
+    const writtenA = writeHandoffDoc({
+      projectDir: dir,
+      workUnit: 'A',
+      state: stateA,
+      features: featuresA,
+      constraints: { constraints: [] },
+    })
+    assert.equal(writtenA.written, true, JSON.stringify(writtenA))
+    assert.equal(writtenA.relativePath, join('.dsh', 'work', 'A', 'HANDOFF.md'))
+    assert.equal(writtenA.displayPath, '.dsh/work/A/HANDOFF.md')
+    const bytesA = readFileSync(join(dir, '.dsh', 'work', 'A', 'HANDOFF.md'), 'utf8')
+    assert.match(bytesA, /- scope: work unit `A`/)
+    assert.match(bytesA, /features: 1\/2 complete, 1 open/)
+    // The brief names the file it IS, so a reader is not sent to another scope's document.
+    assert.match(bytesA, /It lives at `\.dsh\/work\/A\/HANDOFF\.md`/)
+
+    const writtenB = writeHandoffDoc({
+      projectDir: dir,
+      workUnit: 'B',
+      state: stateB,
+      features: featuresB,
+      constraints: { constraints: [] },
+    })
+    assert.equal(writtenB.written, true, JSON.stringify(writtenB))
+    const bytesB = readFileSync(join(dir, '.dsh', 'work', 'B', 'HANDOFF.md'), 'utf8')
+    assert.match(bytesB, /- scope: work unit `B`/)
+    assert.match(bytesB, /features: 0\/1 complete, 1 open/)
+    // THE COLLISION THIS PATH EXISTS TO PREVENT: B's write must not overwrite A's brief.
+    assert.equal(readFileSync(join(dir, '.dsh', 'work', 'A', 'HANDOFF.md'), 'utf8'), bytesA)
+    // Neither unit wrote the project-level brief.
+    assert.equal(existsSync(join(dir, HANDOFF_DOC_RELATIVE_PATH)), false)
+
+    // `workflow_status work_unit=A` pairs A's FILE with A's COUNTS — that pairing is the defect.
+    const statusA = await buildToolDefinition(toolOptions()).execute({ work_unit: 'A' }, execFor(dir))
+    assert.equal(statusA.handoffDoc.displayPath, '.dsh/work/A/HANDOFF.md')
+    assert.deepEqual(statusA.handoffDoc.counts, { total: 2, done: 1, open: 1, stale: 0, unknown: 0 })
+    const statusB = await buildToolDefinition(toolOptions()).execute({ work_unit: 'B' }, execFor(dir))
+    assert.equal(statusB.handoffDoc.displayPath, '.dsh/work/B/HANDOFF.md')
+    assert.deepEqual(statusB.handoffDoc.counts, { total: 1, done: 0, open: 1, stale: 0, unknown: 0 })
+    // The project-level report still says "not written": neither unit's file is its brief.
+    const statusProject = await buildToolDefinition(toolOptions()).execute({}, execFor(dir))
+    assert.equal(statusProject.handoffDoc.present, false)
+    assert.equal(statusProject.handoffDoc.displayPath, HANDOFF_DOC_DISPLAY_PATH)
+
+    // THE PRODUCTION PATH: entering HANDOFF through the tool for unit B writes B's file, and A's
+    // brief and the project-level path are still untouched afterwards.
+    const advance = await buildAdvanceToolDefinition(toolOptions()).execute(
+      {
+        action: 'advance',
+        to: 'HANDOFF',
+        work_unit: 'B',
+        waive_open_features: true,
+        waiver_reason: 'B is deliberately left open for this canary',
+      },
+      execFor(dir),
+    )
+    assert.equal(advance.ok, true, JSON.stringify(advance))
+    assert.equal(advance.handoffDoc?.status, 'written', 'entering HANDOFF must write the unit brief')
+    assert.equal(advance.handoffDoc.path, join(dir, '.dsh', 'work', 'B', 'HANDOFF.md'))
+    assert.match(renderAdvance(advance), /handoff brief: written to \.dsh\/work\/B\/HANDOFF\.md/)
+    assert.equal(readFileSync(join(dir, '.dsh', 'work', 'A', 'HANDOFF.md'), 'utf8'), bytesA)
+    assert.equal(existsSync(join(dir, HANDOFF_DOC_RELATIVE_PATH)), false)
+  } finally {
+    cleanup(dir)
+  }
+})
+
+test('a work-unit id that could escape .dsh/work is refused as a brief target', () => {
+  const dir = makeProject()
+  try {
+    // THE VALIDATOR IS THE LAYER THAT REFUSES IT: `validateWorkUnitId` rejects a separator and a
+    // leading dot, so `../x` never becomes a path segment. The brief derives its path from that
+    // same validator, and `assertHandoffDocTarget` additionally containment-checks the result.
+    assert.equal(validateWorkUnitId('../escape').ok, false)
+    assert.equal(handoffDocRelativePath('../escape'), null)
+    assert.equal(assertHandoffDocTarget(dir, '../escape').ok, false)
+    const refused = writeHandoffDoc({
+      projectDir: dir,
+      workUnit: '../escape',
+      state: {},
+      features: {},
+      constraints: {},
+    })
+    assert.equal(refused.ok, false)
+    assert.equal(refused.written, false)
+    assert.match(refused.reason, /work unit/i)
+    assert.equal(existsSync(join(dir, '.dsh', 'escape')), false)
+    assert.equal(existsSync(join(dir, '..', 'escape')), false)
+    for (const bad of ['..', '.hidden', 'a/b', 'a\\b', 'a b']) {
+      assert.equal(handoffDocRelativePath(bad), null, `${JSON.stringify(bad)} must not resolve to a brief path`)
+    }
+    // The positive control: a valid unit resolves under its own directory and nowhere else.
+    assert.equal(handoffDocRelativePath('A'), join('.dsh', 'work', 'A', 'HANDOFF.md'))
   } finally {
     cleanup(dir)
   }
