@@ -2221,6 +2221,36 @@ test('the shipped package includes tooling/, so an installed copy can read the h
   )
 })
 
+test('the reviewer prompt says what the snapshot covers, and names the exclusions', () => {
+  // EXCLUDING A PATH NARROWED THE FENCE. The old sentence promised that "any path you delete there
+  // is restored from the snapshot", which is false for an excluded path — and the reviewer is the
+  // one agent that can write into the real project, so the prompt must not promise more than the
+  // mechanism does.
+  const prompt = buildReviewPrompt({
+    feature: 'a change',
+    sandboxed: true,
+    workspaceDir: 'C:/temp/copy',
+    snapshotExclude: { patterns: ['node_modules'], paths: ['node_modules'], total: 1 },
+  })
+  assert.match(prompt, /every path that IS IN THE SNAPSHOT is restored/)
+  assert.doesNotMatch(prompt, /any path you delete there is restored/)
+  assert.match(prompt, /EXCLUDES these configured paths: node_modules/)
+  assert.match(prompt, /neither snapshotted nor restored/)
+
+  const withoutExclusions = buildReviewPrompt({
+    feature: 'a change',
+    sandboxed: true,
+    workspaceDir: 'C:/temp/copy',
+    snapshotExclude: { patterns: [], paths: [], total: 0 },
+  })
+  assert.match(withoutExclusions, /every path that IS IN THE SNAPSHOT is restored/)
+  assert.doesNotMatch(withoutExclusions, /EXCLUDES these configured paths/)
+
+  // A NON-SANDBOXED review names no snapshot at all, so the scope sentence must not appear there.
+  const unsandboxed = buildReviewPrompt({ feature: 'a change', workspaceDir: 'C:/project' })
+  assert.doesNotMatch(unsandboxed, /IS IN THE SNAPSHOT/)
+})
+
 test('an unreadable harness table is carried into the audit, not read as "no coverage"', () => {
   const plan = harnessesForDepth({
     depth: VERIFICATION_DEPTHS.INDEPENDENT,
@@ -2229,6 +2259,10 @@ test('an unreadable harness table is carried into the audit, not read as "no cov
   })
   assert.equal(plan.unreadable, true)
   assert.match(plan.note, /could not be read|missing/i)
+  // THE SUBJECT IS THE REVIEWED PROJECT. Discovery is project-scoped now, so "THIS installation"
+  // named the wrong thing when it was the project's own tooling/ that could not be read.
+  assert.match(plan.note, /could not be read in this project/)
+  assert.doesNotMatch(plan.note, /THIS installation/)
   const resolution = resolveVerificationDepth({
     declaredClass: 'security',
     changedFiles: ['lib/approval.js'],

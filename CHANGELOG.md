@@ -39,12 +39,22 @@ live until it has been synced and DSH restarted.
 - **A snapshot whose delete loses to a live handle is cleaned up later.** The immediate bounded retry
   stays; on failure the snapshot **root** is recorded in a durable pending list under the OS temp
   directory, the report names the root with a copy-paste `Remove-Item -LiteralPath '…' -Recurse
-  -Force`, and the bounded in-process retry (30 s, up to 10 min) plus a sweep at plugin start and
-  before the next review finish the job. A sweep only deletes a root that is registered, under the
-  OS temp directory, named `dsh-review-*`, marked as this plugin's snapshot with a `pid` that is no
-  longer alive, and it passes every existing junction/containment/canary guard — **age alone is
-  never a reason**. A snapshot kept because the fence found contamination is evidence and is never
-  registered, so no sweep can reach it.
+  -Force`, and a bounded in-process retry (30 s, up to 10 min) plus a sweep at plugin start and
+  before the next review finish what **this build registered**. Registration writes a release time,
+  and after a 15 s grace the sweep trusts it instead of the host pid — otherwise the retry could
+  never clear its own EPERM leftover while the host was alive. A root with no release record (an
+  older build's leftover, or a hand-written entry) is never auto-deleted: it needs a `pid` that is
+  no longer alive, and still passes the junction/containment/canary guards; **age alone is never a
+  reason**. A snapshot kept because the fence found contamination is evidence, is never registered,
+  and no sweep can reach it. A corrupt pending list is reported as a warning rather than read as
+  "nothing to clean".
+- **`review.snapshot.exclude` refuses `.git`.** An entry whose first segment is `.git` is dropped
+  with a problem explaining that `.git` is both the fence's detection basis and its restore source,
+  so the "`.git` is never excluded" invariant now holds rather than being merely documented.
+- **A fractional `maxMb` is reported as configured.** `0.5` reads "0.5 MB" in an over-cap refusal
+  and is recorded as `0.5` in the isolation evidence while the byte limit stays exact. The shipped
+  core row in `cordis.patch.yml` now carries the `review.snapshot` defaults with the other runtime
+  sections.
 - **The five sandbox-skipped mutation-lock cases now run in the DSH sandbox.** They capture their
   children through file descriptors (`tooling/child-output.mjs` for `spawnSync`, file-backed stdio
   for async spawn) instead of pipes, so the sandbox no longer denies them. Assertions and meaning

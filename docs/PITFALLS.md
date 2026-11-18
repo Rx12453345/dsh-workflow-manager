@@ -325,18 +325,25 @@ printed **one number** and left the reader to guess which directory was responsi
 Fix: the immediate bounded retry stays; a delete that still fails hands the snapshot **ROOT** to a
 durable pending list under the OS temp directory and the report names the root **with a copy-paste
 `Remove-Item -LiteralPath '…' -Recurse -Force`**. A bounded in-process retry (every 30 s, up to
-10 min) plus a sweep at plugin start and before the next review finish it. A sweep may delete only
-a **registered** root that is under the OS temp directory, named `dsh-review-*`, carries
-`snapshot.json` with `plugin: dsh-workflow` / `kind: review-snapshot` and **a pid that is no longer
-alive**, and still passes every junction/containment/canary guard — **age alone never authorises a
-delete**, and a snapshot kept because the fence found contamination is evidence that is never
-registered. The caps and exclusions became `review.snapshot.*` (defaults 512 MB / 20000 /
-`["node_modules"]`), **`.git` is never excluded** (the fence is both the detection and the restore
-basis), every exclusion is printed in the isolation evidence as "not verified", and an over-cap
-refusal lists the top directories by size or entry count plus the remedy. **VERIFIED** by the
-isolation-suite cases (orphan swept, live owner kept, ownerless marker kept, out-of-scope root
-kept, non-our-marker kept, contamination never queued, bounded retry); the seven covering mutation
-harnesses also ran for this change, each with every mutant caught and sources restored byte-for-byte.
+10 min) plus sweeps at plugin start and before the next review finish what **this build registered**.
+Registration writes `releasedAt`, and after a 15 s grace the sweep trusts that release instead of the
+marker's pid — *the pid belongs to the host, which is still alive*, so without a release record the
+retry could never clear its own EPERM leftover (that was the first version of this fix, and it burned
+the whole retry window printing "its recorded owner pid is still running"). A root with **no** release
+record — an older build's leftover, or a hand-written entry — is never auto-deleted: it still needs a
+`pid` that is no longer alive, and every junction/containment/canary guard. **Age alone never
+authorises a delete**, and a snapshot kept because the fence found contamination is evidence that is
+never registered. The caps and exclusions became `review.snapshot.*` (defaults 512 MB / 20000 /
+`["node_modules"]`), **`.git` is never excluded** — and a `review.snapshot.exclude` entry naming it is
+now REFUSED with a problem, because the fence is both the detection and the restore basis, so the
+invariant is enforced rather than documented — every exclusion is printed in the isolation evidence as
+"not verified", a fractional `maxMb` is reported exactly as configured (0.5, not a rounded 1), and an
+over-cap refusal lists the top directories by size or entry count plus the remedy. A corrupt pending
+list is reported as a warning, never read as "nothing to clean". **VERIFIED** by the
+isolation-suite cases (orphan swept after the grace, live owner with no release record kept, ownerless
+marker kept, out-of-scope root kept, non-our-marker kept, contamination never queued, corrupt list
+reported, bounded retry); the seven covering mutation harnesses also ran for this change, each with
+every mutant caught and sources restored byte-for-byte.
 
 ### A name list is not a classifier
 `SHELL_TOOLS` enumerated the shell tools the plugin knew (`bash`, `pwsh`, `exec`, …). The host then moved

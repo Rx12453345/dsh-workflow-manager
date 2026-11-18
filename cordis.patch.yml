@@ -167,6 +167,18 @@
           confirmation: on-override # never | on-override | always
           report: true # print the resolved class and depth in workflow_status
 
+        # ---- the reviewer's isolated copy ----
+        # PROJECT-scoped: a project's own .dsh/workflow.yml can override these. `node_modules` is
+        # the shipped exclusion (regenerable, huge, never reviewed), and every exclusion is
+        # printed in the isolation evidence because an excluded path is NOT verified. `.git` is
+        # never excludable: it is both the fence's detection basis and its restore source.
+        review:
+          snapshot:
+            maxMb: 512
+            maxFiles: 20000
+            exclude:
+              - node_modules
+
         # ---- escalation triggers ----
         escalation:
           onContextOverflow: true

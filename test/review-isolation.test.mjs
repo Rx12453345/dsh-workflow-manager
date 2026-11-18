@@ -51,6 +51,7 @@ import { createHash } from 'node:crypto'
 import { DEFAULT_DIMENSIONS, renderIsolation, runReview } from '../lib/review.js'
 import {
   SNAPSHOT_CANARY_NAME,
+  SNAPSHOT_CLEANUP_RELEASE_GRACE_MS,
   SNAPSHOT_CLEANUP_RETRY,
   SNAPSHOT_MARKER_NAME,
   SNAPSHOT_REMOVE_RETRY,
@@ -1169,6 +1170,71 @@ test('the two cap failures do not leak a snapshot directory', t => {
   assert.deepEqual(readdirSync(tempRoot), before, 'a refused snapshot leaves no temp root behind')
 })
 
+test('a fractional maxMb is reported as configured, and the byte limit stays exact', t => {
+  const project = makeProject(t)
+  const capBytes = 0.5 * 1024 * 1024
+  const tiny = createReviewSnapshot(project, { maxBytes: capBytes })
+  assert.equal(tiny.ok, true, tiny.reason)
+  t.after(() => {
+    try {
+      rmSync(tiny.rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch {
+      // best effort
+    }
+  })
+  // THE EVIDENCE RECORDS THE VALUE THE USER WROTE. Rounding 0.5 to 1 made the over-cap remedy
+  // name a cap nobody configured.
+  assert.equal(tiny.caps.maxMb, 0.5)
+
+  mkdirSync(join(project, 'large'))
+  writeFileSync(join(project, 'large', 'payload.bin'), Buffer.alloc(600 * 1024, 0x41))
+  const over = createReviewSnapshot(project, { maxBytes: capBytes })
+  assert.equal(over.ok, false)
+  assert.match(over.reason, /over the 0\.5 MB cap/, `the configured cap is printed as written: ${over.reason}`)
+  assert.match(over.detail, /review\.snapshot\.maxMb \(currently 0\.5\)/)
+})
+
+test('the module itself refuses a .git exclusion, so .git stays content-hashed', t => {
+  const project = makeProject(t)
+  const snapshot = createReviewSnapshot(project, { exclude: ['.git'] })
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch {
+      // best effort
+    }
+  })
+  assert.deepEqual(snapshot.exclude.patterns, [], 'a direct caller cannot exclude git metadata either')
+  assert.ok(snapshot.baseline.has('.git/HEAD'), 'the git history is in the snapshot and therefore hashed')
+  assert.equal(typeof snapshot.baseline.get('.git/HEAD').hash, 'string')
+})
+
+test('a corrupt pending-cleanup list is reported, not read as "nothing to clean"', async t => {
+  const project = makeProject(t)
+  const statePath = join(makeHolder(t, 'wf-iso-corrupt-state-'), 'pending.json')
+  writeFileSync(statePath, '{ this is not json')
+  const { service } = reviewerThat()
+  const outcome = await runReviewWithCleanup(t, {
+    feature: 'a change',
+    parent: { id: 'parent-1' },
+    subagents: service,
+    workspaceDir: project,
+    isolation: { statePath },
+    config: { bar: 8 },
+  })
+  assert.equal(outcome.isolation.sweep.checked, 0, 'an unreadable list reads as an empty one...')
+  assert.equal(
+    outcome.isolation.pendingCleanupProblems.length > 0,
+    true,
+    '...and that fact is reported instead of hidden',
+  )
+  assert.match(outcome.isolation.pendingCleanupProblems[0], /not valid JSON/)
+  const text = renderIsolation(outcome.isolation).join('\n')
+  assert.match(text, /leftover-snapshot list could not be read/)
+  assert.match(text, /NOT being tracked/)
+})
+
 // ---------------------------------------------------------------------------
 // the snapshot-cleanup janitor
 // ---------------------------------------------------------------------------
@@ -1208,6 +1274,25 @@ function makeSweepableSnapshot(t, tempRoot, options = {}) {
   return root
 }
 
+/**
+ * Write a pending list the way an OLDER build did: the entry has NO `releasedAt`.
+ *
+ * The release record is what lets the sweep trust that the owner finished with the snapshot, so a
+ * legacy entry must still pass the old pid test. Writing the file directly is the only way to
+ * produce that shape: `registerPendingSnapshotCleanup` always records when the release happened.
+ */
+function writeLegacyPendingList(statePath, entries) {
+  writeFileSync(
+    statePath,
+    `${JSON.stringify({ plugin: 'dsh-workflow', kind: 'review-cleanup', pending: entries }, null, 2)}\n`,
+  )
+}
+
+/** A sweep clock advanced past the release grace, so a registered entry is eligible. */
+function afterReleaseGrace() {
+  return Date.now() + SNAPSHOT_CLEANUP_RELEASE_GRACE_MS + 1000
+}
+
 test('the sweep removes a registered orphan snapshot and nothing else', t => {
   const tempRoot = makeHolder(t, 'wf-iso-janitor-temp-')
   const statePath = join(makeHolder(t, 'wf-iso-janitor-state-'), 'pending.json')
@@ -1216,9 +1301,10 @@ test('the sweep removes a registered orphan snapshot and nothing else', t => {
 
   const registered = registerPendingSnapshotCleanup({ rootDir: orphan, projectDir: null }, { statePath })
   assert.equal(registered.ok, true, registered.reason)
+  assert.equal(typeof registered.entry.releasedAt, 'string', 'registration records the release time')
   assert.equal(readPendingSnapshots(statePath).entries.length, 1)
 
-  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  const swept = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
   assert.equal(swept.ok, true)
   assert.deepEqual(swept.removed, [orphan], 'the registered orphan is deleted')
   assert.equal(existsSync(orphan), false)
@@ -1226,31 +1312,91 @@ test('the sweep removes a registered orphan snapshot and nothing else', t => {
   assert.equal(readPendingSnapshots(statePath).entries.length, 0, 'the completed entry leaves the list')
 })
 
-test('the sweep never deletes a snapshot whose recorded owner is still alive', t => {
-  const tempRoot = makeHolder(t, 'wf-iso-janitor-live-')
-  const statePath = join(makeHolder(t, 'wf-iso-janitor-live-state-'), 'pending.json')
+test('a registered entry is kept inside the release grace and swept after it, even with the LIVE host pid', t => {
+  // THE DEFECT THIS PINS (review finding 1, major). The marker records the HOST's pid, so a sweep
+  // that only asked "is the owner alive" could never clear the leftover of the very process that
+  // registered it: the 30 s retry would burn its whole window refusing its own entry. Registration
+  // is a release record, and after the grace it is the proof of ownership.
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-release-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-release-state-'), 'pending.json')
   const live = makeSweepableSnapshot(t, tempRoot, { pid: process.pid })
   registerPendingSnapshotCleanup({ rootDir: live }, { statePath })
 
-  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  const early = sweepPendingSnapshots({ statePath, tempRoot })
+  assert.deepEqual(early.removed, [], 'the grace has not elapsed')
+  assert.equal(existsSync(live), true, 'the release grace protects the just-failed cleanup')
+  assert.match(early.kept[0].reason, /release grace has not elapsed/)
+
+  const later = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
+  assert.deepEqual(later.removed, [live], 'after the grace the registered leftover is swept')
+  assert.equal(existsSync(live), false)
+  assert.equal(readPendingSnapshots(statePath).entries.length, 0)
+})
+
+test('a legacy entry (no release record) with a LIVE pid is never deleted', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-live-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-live-state-'), 'pending.json')
+  const live = makeSweepableSnapshot(t, tempRoot, { pid: process.pid })
+  writeLegacyPendingList(statePath, [
+    { rootDir: live, projectDir: null, registeredAt: new Date().toISOString(), reason: null },
+  ])
+
+  const swept = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
   assert.deepEqual(swept.removed, [])
-  assert.equal(existsSync(live), true, 'a live owner keeps its snapshot no matter how old it looks')
+  assert.equal(existsSync(live), true, 'an entry this build did not register gets no release trust')
   assert.match(swept.kept[0].reason, new RegExp(`pid ${process.pid} is still running`))
   assert.equal(readPendingSnapshots(statePath).entries.length, 1, 'it stays pending for a later sweep')
 })
 
-test('the sweep never deletes by age alone: an ownerless marker is kept', t => {
+test('a legacy entry whose owner is provably dead is swept', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-dead-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-dead-state-'), 'pending.json')
+  const dead = makeSweepableSnapshot(t, tempRoot)
+  writeLegacyPendingList(statePath, [{ rootDir: dead, projectDir: null, registeredAt: null, reason: null }])
+
+  const swept = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
+  assert.deepEqual(swept.removed, [dead], 'an older leftover is swept once its owner is gone')
+  assert.equal(existsSync(dead), false)
+})
+
+test('the sweep never deletes by age alone: a legacy entry with no usable pid is kept', t => {
   const tempRoot = makeHolder(t, 'wf-iso-janitor-age-')
   const statePath = join(makeHolder(t, 'wf-iso-janitor-age-state-'), 'pending.json')
-  // A day old (see makeSweepableSnapshot), but with no usable pid — so "old" is the only thing a
-  // bad sweep could act on, and it must not be enough.
+  // A day old (see makeSweepableSnapshot), no release record, no pid — so "old" is the only thing
+  // a bad sweep could act on, and it must not be enough.
   const old = makeSweepableSnapshot(t, tempRoot, { marker: { pid: undefined } })
-  registerPendingSnapshotCleanup({ rootDir: old }, { statePath })
+  writeLegacyPendingList(statePath, [{ rootDir: old, projectDir: null, registeredAt: null, reason: null }])
 
-  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  const swept = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
   assert.deepEqual(swept.removed, [])
   assert.equal(existsSync(old), true)
+  assert.match(swept.kept[0].reason, /no release record/)
   assert.match(swept.kept[0].reason, /no usable owner pid/)
+})
+
+test('a registered entry whose root is held stays pending and is retried, not lost', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-held-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-held-state-'), 'pending.json')
+  const held = makeSweepableSnapshot(t, tempRoot)
+  registerPendingSnapshotCleanup({ rootDir: held }, { statePath })
+
+  const first = sweepPendingSnapshots({
+    statePath,
+    tempRoot,
+    now: afterReleaseGrace(),
+    rm() {
+      throw Object.assign(new Error('EPERM: still held by a test runner'), { code: 'EPERM' })
+    },
+  })
+  assert.deepEqual(first.removed, [], 'the held root was not deleted')
+  assert.equal(existsSync(held), true)
+  assert.equal(first.kept.length, 1)
+  assert.equal(readPendingSnapshots(statePath).entries.length, 1, 'the obligation survives a failed sweep')
+
+  const second = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
+  assert.deepEqual(second.removed, [held], 'the next sweep finishes what the first could not')
+  assert.equal(existsSync(held), false)
+  assert.equal(readPendingSnapshots(statePath).entries.length, 0)
 })
 
 test('the sweep refuses a root it was not told to look under, and one that is not a snapshot name', t => {
@@ -1262,7 +1408,7 @@ test('the sweep refuses a root it was not told to look under, and one that is no
   registerPendingSnapshotCleanup({ rootDir: elsewhere }, { statePath })
   registerPendingSnapshotCleanup({ rootDir: wrongName }, { statePath })
 
-  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  const swept = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
   assert.deepEqual(swept.removed, [])
   assert.equal(existsSync(elsewhere), true, 'a root outside the temp root is kept')
   assert.equal(existsSync(wrongName), true, 'a directory without the snapshot prefix is kept')
@@ -1275,7 +1421,7 @@ test('the sweep refuses a root whose marker is not this plugin\u2019s snapshot',
   const notOurs = makeSweepableSnapshot(t, tempRoot, { marker: { plugin: 'someone-else' } })
   registerPendingSnapshotCleanup({ rootDir: notOurs }, { statePath })
 
-  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  const swept = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
   assert.deepEqual(swept.removed, [])
   assert.equal(existsSync(notOurs), true)
   assert.match(swept.kept[0].reason, /does not name a dsh-workflow review snapshot/)
@@ -1309,18 +1455,12 @@ test('a failed removal is handed to the durable janitor, which can finish it lat
   const pending = readPendingSnapshots(statePath)
   assert.equal(pending.entries.length, 1)
   assert.equal(pending.entries[0].rootDir, snapshot.rootDir)
-
-  // THE REVIEW PROCESS IS GONE BY THE TIME THE JANITOR RUNS. This test process created the
-  // snapshot, so its marker records a LIVE pid; a crash is simulated by rewriting that pid to one
-  // that cannot be running. Without this the sweep would (correctly) keep it forever.
-  const marker = JSON.parse(readFileSync(join(snapshot.rootDir, SNAPSHOT_MARKER_NAME), 'utf8'))
-  writeFileSync(
-    join(snapshot.rootDir, SNAPSHOT_MARKER_NAME),
-    `${JSON.stringify({ ...marker, pid: 0x7fffff0 }, null, 2)}\n`,
-  )
+  assert.equal(typeof pending.entries[0].releasedAt, 'string', 'the entry records when it was released')
 
   // The snapshot itself is still on disk (the seam deleted nothing); NOW the janitor finishes it.
-  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  // No marker rewrite is needed: registration is a release record, so the LIVE host pid the marker
+  // carries is no longer an obstacle after the grace.
+  const swept = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
   assert.deepEqual(swept.removed, [snapshot.rootDir])
   assert.equal(existsSync(snapshot.rootDir), false, 'the janitor completed what the review could not')
 })
@@ -1375,15 +1515,17 @@ test('the in-process retry is bounded and stops as soon as the list is empty', t
   const tempRoot = makeHolder(t, 'wf-iso-retry-temp-')
   const statePath = join(makeHolder(t, 'wf-iso-retry-state-'), 'pending.json')
   const orphan = makeSweepableSnapshot(t, tempRoot)
+  // A REAL clock and no grace: this case is about the retry's control flow, not the grace (which
+  // has its own case above). The registration is still what makes the entry eligible.
   registerPendingSnapshotCleanup({ rootDir: orphan }, { statePath })
 
   const timers = []
-  let now = 0
   const controller = ensureCleanupRetry({
     statePath,
     tempRoot,
     intervalMs: 30,
     windowMs: 120,
+    releaseGraceMs: 0,
     setTimeout: (fn, ms) => {
       const handle = { fn, ms, unref() {} }
       timers.push(handle)
@@ -1392,16 +1534,17 @@ test('the in-process retry is bounded and stops as soon as the list is empty', t
     clearTimeout: handle => {
       handle.cleared = true
     },
-    now: () => now,
+    now: () => Date.now(),
   })
   assert.equal(controller.started, true)
   assert.equal(SNAPSHOT_CLEANUP_RETRY.intervalMs, 30_000, 'the shipped interval is the one documented')
   assert.equal(SNAPSHOT_CLEANUP_RETRY.windowMs, 10 * 60_000)
+  assert.equal(SNAPSHOT_CLEANUP_RELEASE_GRACE_MS, 15_000, 'the shipped release grace is bounded and short')
   assert.equal(timers.length, 1)
 
   timers[0].fn()
   assert.equal(controller.attempts, 1)
-  assert.equal(existsSync(orphan), false, 'the retry swept the orphan')
+  assert.equal(existsSync(orphan), false, 'the retry swept the orphan it registered')
   assert.equal(controller.stopped, true, 'an empty list stops the retry')
   assert.equal(timers.length, 1, 'no further timer is scheduled')
 })
@@ -1410,9 +1553,10 @@ test('the in-process retry gives up at the window instead of running forever', t
   t.after(() => stopCleanupRetry())
   const tempRoot = makeHolder(t, 'wf-iso-retry-window-temp-')
   const statePath = join(makeHolder(t, 'wf-iso-retry-window-state-'), 'pending.json')
-  // A live owner: every sweep keeps it, so only the window can stop the retry.
+  // A LEGACY entry whose owner is alive: every sweep keeps it, so only the window can stop the
+  // retry. (A registered entry would be swept after its grace, which is a different case.)
   const held = makeSweepableSnapshot(t, tempRoot, { pid: process.pid })
-  registerPendingSnapshotCleanup({ rootDir: held }, { statePath })
+  writeLegacyPendingList(statePath, [{ rootDir: held, projectDir: null, registeredAt: null, reason: null }])
 
   const timers = []
   let now = 0

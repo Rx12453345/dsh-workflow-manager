@@ -23,6 +23,7 @@ import {
   readWorkflowFile,
 } from '../lib/workflow-file.js'
 import { toLosslessJson } from '../lib/tools.js'
+import { cleanupSweepReportLines } from '../lib/index.js'
 import {
   aggregateScore,
   decideVerdict,
@@ -565,6 +566,33 @@ test('an unusable snapshot value falls back on the safe side and says so', () =>
   assert.match(notASection.problems[0], /expected a section/)
 })
 
+test('a .git exclusion is refused with an explanation, so the fence keeps its restore basis', () => {
+  // THE INVARIANT IS ENFORCED, NOT DOCUMENTED. `.git` is both the fence's detection basis and the
+  // source a restore reads from; excluding it would make a damaged project unrecoverable. Every
+  // spelling of the first segment is refused, and the problem says why.
+  for (const entry of ['.git', '.git/', '.git/objects', './.git', '.GIT', '.git\\objects']) {
+    const reader = readReviewSnapshotConfig({ exclude: [entry] })
+    assert.deepEqual(reader.exclude, [], `${entry} must not be applied`)
+    assert.equal(reader.problems.length, 1, `${entry} must be reported`)
+    assert.match(reader.problems[0], /git metadata/)
+    assert.match(reader.problems[0], /never excluded/)
+    assert.match(reader.problems[0], /restore reads from|restore source|unrecoverable/i)
+    assert.equal(reader.usable, false, `${entry} makes the section not fully usable`)
+  }
+  // Only the FIRST segment: a nested directory that happens to be called `.git` is not the
+  // repository metadata this invariant is about.
+  const nested = readReviewSnapshotConfig({ exclude: ['pkg/.git'] })
+  assert.deepEqual(nested.exclude, ['pkg/.git'])
+  assert.deepEqual(nested.problems, [])
+})
+
+test('a fractional snapshot cap is kept exactly, not rounded', () => {
+  const reader = readReviewSnapshotConfig({ maxMb: 0.5 })
+  assert.equal(reader.maxMb, 0.5, 'the evidence must record the value the user wrote')
+  assert.equal(reader.usable, true)
+  assert.equal(resolveConfig({ review: { snapshot: { maxMb: 0.5 } } }).review.snapshot.maxMb, 0.5)
+})
+
 test('configWarnings reports an unusable review.snapshot section', () => {
   const warnings = configWarnings(resolveConfig({ review: { snapshot: { maxMb: 'big', exclude: ['../x'] } } }))
   assert.ok(
@@ -588,4 +616,44 @@ test('configWarnings reports an unusable review.snapshot section', () => {
     sectionWarnings.some(warning => warning.startsWith('review is ') && warning.includes('expected a section')),
     `a malformed review section is reported: ${sectionWarnings.join(' | ')}`,
   )
+})
+
+// ---------------------------------------------------------------------------
+// the mount-time cleanup report
+// ---------------------------------------------------------------------------
+//
+// A CORRUPT PENDING LIST IS NOT "NOTHING TO CLEAN". `readPendingSnapshots` treats an unreadable
+// list as empty — the safe direction for *not* deleting anything, but the fail-open direction for
+// *tracking* — so the startup lines are the only place the difference becomes visible.
+
+test('the mount-time cleanup report surfaces a corrupt pending list instead of a clean summary', () => {
+  const corrupt = cleanupSweepReportLines({
+    checked: 0,
+    removed: [],
+    gone: [],
+    kept: [],
+    problems: ['the pending cleanup list is not valid JSON (Unexpected token)'],
+  })
+  assert.equal(corrupt.length, 1, 'one warning for the unreadable list, and no summary')
+  assert.equal(corrupt[0].level, 'warn')
+  assert.match(corrupt[0].message, /not valid JSON/)
+  assert.doesNotMatch(corrupt[0].message, /0 removed/, 'a corrupt list must not print a clean summary')
+
+  assert.deepEqual(
+    cleanupSweepReportLines({ checked: 0, removed: [], gone: [], kept: [], problems: [] }),
+    [],
+    'a clean mount stays silent',
+  )
+
+  const kept = cleanupSweepReportLines({
+    checked: 2,
+    removed: [],
+    gone: ['C:/t/dsh-review-gone'],
+    kept: [{ rootDir: 'C:/t/dsh-review-held', reason: 'held by a test runner' }],
+    problems: [],
+  })
+  assert.equal(kept.length, 1)
+  assert.equal(kept[0].level, 'warn', 'a kept root is a warning, not an info line')
+  assert.match(kept[0].message, /0 removed, 1 already gone, 1 kept \(of 2 pending\)/)
+  assert.match(kept[0].message, /dsh-review-held/)
 })
