@@ -20,6 +20,43 @@ live until it has been synced and DSH restarted.
 
 ---
 
+## [Unreleased] — 2026-11-18 (0.4.0)
+
+### Fixed — the review snapshot stops being a fixed-size blind spot
+
+- **The reviewer-snapshot cap and exclusions are configurable.** `review.snapshot.maxMb` (512),
+  `maxFiles` (20000) and `exclude` (`["node_modules"]`) resolve from the row and the project file,
+  and the defaults reproduce the old constants apart from the one shipped exclusion. `.git` is
+  **never** excluded — the fence is both the detection and the restore basis for the project's
+  history — and **every exclusion is printed in the isolation evidence** as a path that was not
+  snapshotted and is not verified. An over-cap refusal now names the top directories by size (or by
+  entry count) and the remedy (raise the cap, or exclude a directory), instead of one number.
+- **Harness discovery reads the REVIEWED project's `tooling/`, not the installed plugin's.** It was
+  answering "which harnesses cover this file" with the installation's own table, so an external
+  project was told to run this plugin's suite. Targets now match a normalised project-relative path
+  (never a basename in another directory), and a project with no `tooling/` resolves no harnesses
+  with a note that it has no harness table. The installed plugin's harnesses are never borrowed.
+- **A snapshot whose delete loses to a live handle is cleaned up later.** The immediate bounded retry
+  stays; on failure the snapshot **root** is recorded in a durable pending list under the OS temp
+  directory, the report names the root with a copy-paste `Remove-Item -LiteralPath '…' -Recurse
+  -Force`, and the bounded in-process retry (30 s, up to 10 min) plus a sweep at plugin start and
+  before the next review finish the job. A sweep only deletes a root that is registered, under the
+  OS temp directory, named `dsh-review-*`, marked as this plugin's snapshot with a `pid` that is no
+  longer alive, and it passes every existing junction/containment/canary guard — **age alone is
+  never a reason**. A snapshot kept because the fence found contamination is evidence and is never
+  registered, so no sweep can reach it.
+- **The five sandbox-skipped mutation-lock cases now run in the DSH sandbox.** They capture their
+  children through file descriptors (`tooling/child-output.mjs` for `spawnSync`, file-backed stdio
+  for async spawn) instead of pipes, so the sandbox no longer denies them. Assertions and meaning
+  are unchanged; the SIGTERM case keeps its platform gate (documented in `docs/TESTING.md`).
+- **A start-failure detail carries four REAL stack frames.** The stack header (`Error: message`) was
+  counted as one of the four, so the report kept three frames and repeated the message; frames are
+  now taken from lines matching `^\s+at ` and the message appears once.
+
+`package.json` stays **0.4.0**.
+
+---
+
 ## [Unreleased] — 2026-11-01 (0.4.0)
 
 ### Changed — the recorded state survives a context reset, and judges staleness

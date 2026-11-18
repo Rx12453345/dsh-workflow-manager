@@ -45,6 +45,24 @@ return the same `{ result, dispose }` receipt, so accept either and adapt at the
 `get` route can return a facade without the entry point while the property carries the real service,
 so probe by shape, not by non-nullness. **VERIFIED on the real host** — see A1 in `CHANGELOG.md`.
 
+### The activation spec is FLAT — a nested `request` throws before the child exists
+`startActivation` takes the spec fields at the top level (`{ provider, label, prompt, parent,
+signal, delivery, outputSchema, maxDepth }`; `SubagentActivationSpec extends Omit<SubagentStartRequest,
+'label' | 'signal'>`). Passing the older `{ provider, request: { prompt, parent, … } }` shape leaves
+`spec.parent` **undefined**, and the host throws `TypeError` on `spec.parent.id` — so every review
+came back `unavailable` with a one-line message, on a host where the service was plainly present.
+The nested shape survived because the activation mock read only the fields the code happened to
+send; the mock now enforces the host's first two reads (`spec.parent.id`, then the prompt) so a
+regression goes red offline. **VERIFIED** by `test/review.test.mjs` and the P0 commit
+`236596d`; both covering harnesses (state 6/6, verification 27/27) were run for it.
+
+**A start failure keeps four REAL frames.** The detail appended `error.stack.split('\n').slice(0, 4)`,
+and an Error's stack begins with its `"<Name>: <message>"` header — so one of the four slots
+repeated the message and only **three** frames survived, while the comment claimed four. Its own
+review had to reconstruct the refusal from those frames twice. Fix: filter lines matching
+`^\s+at ` and slice four; `test/review.test.mjs` now asserts four frame lines **and** that the
+message appears exactly once. **VERIFIED** by the strengthened test.
+
 ### `maxDepth` is an absolute tree bound, and 1 forbade this plugin's own architecture
 `SubagentDepthError` when a reviewer was created inside an orchestrating child: depth accumulates down the
 tree, so main(0) → child(1) → reviewer(2) needs 2, while the constant was commented "LOCKED: prevents
@@ -293,6 +311,32 @@ other half: `.git/index` is content-hashed, and the reviewer prompt tells the re
 which rewrites it — a false CONTAMINATED against a review that changed nothing (a human's concurrent push
 did the same thing through `.git/logs`). Git's own bookkeeping is now compared by existence and kind only.
 **VERIFIED** by the cases in `test/review-isolation.test.mjs`.
+
+### A cleanup that only REPORTS its failure still leaks, and an over-cap error with one number is not actionable
+The guarded delete already retried (`8 × 250 ms`, a nine-second window) and reported what it kept,
+which was read as "handled". It is not: **a live review whose reviewer had launched `npm test` lost
+that race**, the copy was correctly kept, and nothing ever deleted it. Measured: **one run of the
+isolation suite left five temp roots behind**. The report also named `.../work`, which is usually
+already gone when the *root* delete fails — so the path a human needed was the one that was not
+printed. A second, quieter form of the same shape: the snapshot caps were hard-coded, and a review
+of this repository could not run at all because `node_modules` alone exceeded them; the refusal
+printed **one number** and left the reader to guess which directory was responsible.
+
+Fix: the immediate bounded retry stays; a delete that still fails hands the snapshot **ROOT** to a
+durable pending list under the OS temp directory and the report names the root **with a copy-paste
+`Remove-Item -LiteralPath '…' -Recurse -Force`**. A bounded in-process retry (every 30 s, up to
+10 min) plus a sweep at plugin start and before the next review finish it. A sweep may delete only
+a **registered** root that is under the OS temp directory, named `dsh-review-*`, carries
+`snapshot.json` with `plugin: dsh-workflow` / `kind: review-snapshot` and **a pid that is no longer
+alive**, and still passes every junction/containment/canary guard — **age alone never authorises a
+delete**, and a snapshot kept because the fence found contamination is evidence that is never
+registered. The caps and exclusions became `review.snapshot.*` (defaults 512 MB / 20000 /
+`["node_modules"]`), **`.git` is never excluded** (the fence is both the detection and the restore
+basis), every exclusion is printed in the isolation evidence as "not verified", and an over-cap
+refusal lists the top directories by size or entry count plus the remedy. **VERIFIED** by the
+isolation-suite cases (orphan swept, live owner kept, ownerless marker kept, out-of-scope root
+kept, non-our-marker kept, contamination never queued, bounded retry); the seven covering mutation
+harnesses also ran for this change, each with every mutant caught and sources restored byte-for-byte.
 
 ### A name list is not a classifier
 `SHELL_TOOLS` enumerated the shell tools the plugin knew (`bash`, `pwsh`, `exec`, …). The host then moved

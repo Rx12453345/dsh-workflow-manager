@@ -32,12 +32,12 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
-import { spawn, spawnSync } from 'node:child_process'
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { skipInSandbox } from './sandbox.mjs'
+import { runCaptured } from '../tooling/child-output.mjs'
 
 import { EXIT_LOCK_HELD, MutationLockHeld, withMutationLock } from '../tooling/mutation-lock.mjs'
 
@@ -59,20 +59,48 @@ function writeLockFile(path, record) {
   writeFileSync(path, typeof record === 'string' ? record : JSON.stringify(record), 'utf8')
 }
 
+/**
+ * Spawn a child whose stdout/stderr are FILE DESCRIPTORS, not pipes.
+ *
+ * WHY: the DSH Windows sandbox denies a named pipe, so `spawn(..., { stdio: ['ignore', 'pipe',
+ * 'pipe'] })` fails for any child this suite tries to capture — which is why five cases in this
+ * file used to skip there, and why CI (the only place they ever ran) found a two-winner race.
+ * A temp file has no pipe, so the same transport the mutation harnesses use
+ * (`tooling/child-output.mjs`) works here: for a `spawnSync` case that helper is called directly,
+ * and for an async `spawn` the two descriptors are opened here and passed as `stdio`.
+ *
+ * The parent closes ITS copies immediately after `spawn`: the child owns the handles, and on
+ * Windows a temp directory cannot be removed while a handle is open.
+ *
+ * @param args - argv after `process.execPath`.
+ * @returns `{ child, read() }`; `read()` returns `{ stdout, stderr }` as text.
+ */
+function startCaptured(args) {
+  const dir = mkdirSync(join(scratch, `capture-${++counter}`), { recursive: true })
+  const stdoutPath = join(dir, 'stdout.log')
+  const stderrPath = join(dir, 'stderr.log')
+  const stdoutFd = openSync(stdoutPath, 'w')
+  const stderrFd = openSync(stderrPath, 'w')
+  let child
+  try {
+    child = spawn(process.execPath, args, { cwd: ROOT, stdio: ['ignore', stdoutFd, stderrFd] })
+  } finally {
+    closeSync(stdoutFd)
+    closeSync(stderrFd)
+  }
+  return {
+    child,
+    read() {
+      return { stdout: readFileSync(stdoutPath, 'utf8'), stderr: readFileSync(stderrPath, 'utf8') }
+    },
+  }
+}
+
 /** Start a holder child that holds the lock for `holdMs`. */
 function startHolder(path, holdMs, gatePath) {
   const args = [HOLDER_CHILD, path, String(holdMs), 'the child holder']
   if (gatePath) args.push(gatePath)
-  const child = spawn(process.execPath, args, { cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'] })
-  if (process.env.MUTATION_LOCK_TEST_DEBUG === '1') {
-    const chunks = []
-    child.stdout.on('data', chunk => chunks.push([String(chunk), '']))
-    child.stderr.on('data', chunk => chunks.push(['', String(chunk)]))
-    child.on('exit', code => {
-      console.error(`[debug] spawn argv=${JSON.stringify(args)} -> code=${code} out=${JSON.stringify(chunks)}`)
-    })
-  }
-  return child
+  return startCaptured(args)
 }
 
 /**
@@ -87,55 +115,60 @@ async function raceForLock(path, { count = 4, holdMs = 2000 } = {}) {
   mkdirSync(join(path, '..'), { recursive: true })
   const children = []
   for (let index = 0; index < count; index += 1) {
-    children.push(
-      spawn(process.execPath, [HOLDER_CHILD, path, String(holdMs), 'the child holder', gate], {
-        cwd: ROOT,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      }),
-    )
+    children.push(startCaptured([HOLDER_CHILD, path, String(holdMs), 'the child holder', gate]))
   }
   await new Promise(resolve => setTimeout(resolve, 400))
   writeFileSync(gate, 'go', 'utf8')
-  const results = await Promise.all(children.map(child => collect(child, 40000)))
+  const results = await Promise.all(
+    children.map(async handle => {
+      const { code, signal } = await collect(handle.child, 40000)
+      const { stdout, stderr } = handle.read()
+      return { code, signal, output: `${stdout}${stderr}` }
+    }),
+  )
   rmSync(gate, { force: true })
   return results
 }
 
-/** Collect a child's stdout+stderr and its exit status, with a hard timeout. */
+/** Collect a child's exit status, with a hard timeout. Output is read from its files. */
 function collect(child, timeoutMs = 30000) {
-  let output = ''
-  child.stdout?.on('data', chunk => {
-    output += String(chunk)
-  })
-  child.stderr?.on('data', chunk => {
-    output += String(chunk)
-  })
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       child.kill('SIGKILL')
-      reject(new Error(`child did not exit within ${timeoutMs}ms: ${output}`))
+      reject(new Error(`child did not exit within ${timeoutMs}ms`))
     }, timeoutMs)
     child.on('exit', (code, signal) => {
       clearTimeout(timer)
-      resolve({ code, signal, output })
+      resolve({ code, signal })
     })
   })
 }
 
-/** Resolve once the child's output contains `needle`. */
-function outputContains(child, needle, timeoutMs = 20000) {
+/**
+ * Resolve once the child's captured output contains `needle`.
+ *
+ * The output is POLLED from the child's file rather than read from a pipe: with descriptors as
+ * stdio there are no `data` events to listen on, and Node writes synchronously to a file, so the
+ * bytes are visible as soon as the child has printed them.
+ */
+function outputContains(handle, needle, timeoutMs = 20000) {
   const state = { output: '' }
   const seen = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`child never printed "${needle}": ${state.output}`)), timeoutMs)
-    const onData = chunk => {
-      state.output += String(chunk)
+    const started = Date.now()
+    const poll = () => {
+      const captured = handle.read()
+      state.output = `${captured.stdout}${captured.stderr}`
       if (state.output.includes(needle)) {
-        clearTimeout(timer)
         resolve()
+        return
       }
+      if (Date.now() - started > timeoutMs) {
+        reject(new Error(`child never printed "${needle}": ${state.output}`))
+        return
+      }
+      setTimeout(poll, 25)
     }
-    child.stdout?.on('data', onData)
-    child.stderr?.on('data', onData)
+    poll()
   })
   return { seen, state }
 }
@@ -215,8 +248,9 @@ test('a second acquisition fails loudly, naming the holder and forbidding concur
   )
 })
 
-test('independent processes race for the lock and exactly one wins per round', async t => {
-  if (skipInSandbox(t, 'this case launches four child processes; the sandbox denies a piped child (EPERM)')) return
+test('independent processes race for the lock and exactly one wins per round', async () => {
+  // NO SANDBOX SKIP: the children are captured through files, so this case runs everywhere —
+  // including the DSH sandbox that denied it for its whole life before the transport moved.
   for (let round = 1; round <= 3; round += 1) {
     const path = freshPath()
     const results = await raceForLock(path, { count: 4, holdMs: 2000 })
@@ -294,21 +328,20 @@ test('the same race without pipes has exactly one winner, and runs inside the sa
   }
 })
 
-test('a live holder makes the next starter exit with the lock-held code', async t => {
-  if (skipInSandbox(t, 'this case launches a holder and an attacker; the sandbox denies a piped child (EPERM)')) return
+test('a live holder makes the next starter exit with the lock-held code', async () => {
   const path = freshPath()
   const holder = startHolder(path, 8000)
   const { seen } = outputContains(holder, 'ACQUIRED')
   await seen
   assert.equal(existsSync(path), true, 'the holder really has the lock on disk')
 
-  const loser = spawnSync(process.execPath, [ATTACKER_CHILD, path, 'the loser'], { cwd: ROOT, encoding: 'utf8' })
+  const loser = runCaptured(process.execPath, [ATTACKER_CHILD, path, 'the loser'], { cwd: ROOT })
   assert.equal(loser.status, EXIT_LOCK_HELD, `the loser exits ${EXIT_LOCK_HELD}, not 0: ${loser.stderr}`)
   assert.match(loser.stdout, /another mutation harness is already running/)
   assert.match(loser.stdout, /label=the child holder/)
   assert.equal(existsSync(path), true, 'the loser did not disturb the holder lock')
 
-  const exited = await collect(holder)
+  const exited = await collect(holder.child)
   assert.equal(exited.code, 0, 'the holder still finishes normally and releases')
   assert.equal(existsSync(path), false, 'the holder released on the way out')
 })
@@ -533,32 +566,30 @@ test('a parseable string timestamp is READ: a recent one is refused as live-insi
   }
 })
 
-test('the take-over is reported rather than silent', async t => {
-  if (skipInSandbox(t, 'this case launches a holder child; the sandbox denies a piped child (EPERM)')) return
+test('the take-over is reported rather than silent', async () => {
   const path = freshPath()
   writeLockFile(path, { pid: 0x7fffff0, at: Date.now(), host: 'gone-host', label: 'the killed harness' })
 
   // A real harness reports the take-over on stderr; saying so out loud is the whole point.
-  const child = spawnSync(process.execPath, [HOLDER_CHILD, path, '0', 'the next harness'], { cwd: ROOT, encoding: 'utf8' })
+  const child = runCaptured(process.execPath, [HOLDER_CHILD, path, '0', 'the next harness'], { cwd: ROOT })
   assert.equal(child.status, 0, `the take-over run succeeds: ${child.stderr}`)
   assert.match(child.stderr, /taking over a stale lock/)
   assert.match(child.stderr, /label=the killed harness/)
 })
 
-test('a stale lock whose process was hard-killed is recovered, and the source is usable again', async t => {
-  if (skipInSandbox(t, 'this case launches and hard-kills a holder; the sandbox denies a piped child (EPERM)')) return
+test('a stale lock whose process was hard-killed is recovered, and the source is usable again', async () => {
   const path = freshPath()
   const holder = startHolder(path, 60000)
   const { seen } = outputContains(holder, 'ACQUIRED')
   await seen
   assert.equal(existsSync(path), true, 'the holder has the lock')
 
-  const exited = collect(holder)
-  holder.kill('SIGKILL')
+  const exited = collect(holder.child)
+  holder.child.kill('SIGKILL')
   await exited
   assert.equal(existsSync(path), true, 'SIGKILL leaves the lock file behind — that is the hazard')
 
-  const next = spawnSync(process.execPath, [HOLDER_CHILD, path, '0', 'the next harness'], { cwd: ROOT, encoding: 'utf8' })
+  const next = runCaptured(process.execPath, [HOLDER_CHILD, path, '0', 'the next harness'], { cwd: ROOT })
   assert.equal(next.status, 0, `the next run is not wedged: ${next.stderr}`)
   assert.match(next.stdout, /ACQUIRED/)
   assert.match(next.stderr, /taking over a stale lock/)
@@ -619,8 +650,7 @@ test('a thrown error releases the lock and propagates', async () => {
   assert.equal(ran, true, 'the next run is not blocked by the failed one')
 })
 
-test('a hard-killed holder leaves the lock behind, and the next run recovers it', async t => {
-  if (skipInSandbox(t, 'this case launches and hard-kills a holder; the sandbox denies a piped child (EPERM)')) return
+test('a hard-killed holder leaves the lock behind, and the next run recovers it', async () => {
   const path = freshPath()
   const holder = startHolder(path, 60000)
   const { seen } = outputContains(holder, 'ACQUIRED')
@@ -630,12 +660,12 @@ test('a hard-killed holder leaves the lock behind, and the next run recovers it'
   // SIGKILL: no handler runs, which is the whole hazard. On Windows this is also what a
   // "SIGTERM" from Node performs (TerminateProcess), so the recovery path below is the one
   // that has to work there.
-  const exited = collect(holder)
-  holder.kill('SIGKILL')
+  const exited = collect(holder.child)
+  holder.child.kill('SIGKILL')
   await exited
   assert.equal(existsSync(path), true, 'a hard kill leaves the lock file behind')
 
-  const next = spawnSync(process.execPath, [HOLDER_CHILD, path, '0', 'the next harness'], { cwd: ROOT, encoding: 'utf8' })
+  const next = runCaptured(process.execPath, [HOLDER_CHILD, path, '0', 'the next harness'], { cwd: ROOT })
   assert.equal(next.status, 0, `the next run is not wedged: ${next.stderr}`)
   assert.match(next.stdout, /ACQUIRED/)
   assert.match(next.stderr, /taking over a stale lock/)
@@ -645,17 +675,21 @@ test('a hard-killed holder leaves the lock behind, and the next run recovers it'
 
 test(
   'a signal releases the lock and the process dies with a non-zero status',
+  // THE PLATFORM GATE STAYS, AND IT IS NOT A SANDBOX SKIP. Windows has no catchable SIGTERM:
+  // `kill()` calls TerminateProcess, so no JS signal handler can run and the lock cannot be
+  // released by a handler. CI is Windows-only, so this case never executes there — the recovery
+  // path (a hard kill leaving the lock, the next run taking it over) is what runs instead.
   { skip: process.platform === 'win32' ? 'Windows has no catchable SIGTERM: kill() calls TerminateProcess, so no JS signal handler can run there' : false },
   async () => {
     const path = freshPath()
-    const child = startHolder(path, 60000)
-    const { seen } = outputContains(child, 'ACQUIRED')
+    const holder = startHolder(path, 60000)
+    const { seen } = outputContains(holder, 'ACQUIRED')
     await seen
     assert.equal(existsSync(path), true, 'the child holds the lock while it runs')
     assert.match(readFileSync(path, 'utf8'), /the child holder/, 'the lock records the holder label')
 
-    const exited = collect(child)
-    child.kill('SIGTERM')
+    const exited = collect(holder.child)
+    holder.child.kill('SIGTERM')
     const result = await exited
     assert.notEqual(result.code, 0, 'a signalled run is not reported as a success')
     assert.equal(existsSync(path), false, 'SIGTERM released the lock before the process died')

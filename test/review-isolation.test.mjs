@@ -51,10 +51,19 @@ import { createHash } from 'node:crypto'
 import { DEFAULT_DIMENSIONS, renderIsolation, runReview } from '../lib/review.js'
 import {
   SNAPSHOT_CANARY_NAME,
+  SNAPSHOT_CLEANUP_RETRY,
   SNAPSHOT_MARKER_NAME,
   SNAPSHOT_REMOVE_RETRY,
+  SNAPSHOT_ROOT_PREFIX,
   createReviewSnapshot,
+  defaultCleanupStatePath,
+  discardReviewSnapshot,
+  ensureCleanupRetry,
+  readPendingSnapshots,
+  registerPendingSnapshotCleanup,
   removeReviewSnapshot,
+  stopCleanupRetry,
+  sweepPendingSnapshots,
   verifyReviewSnapshot,
 } from '../lib/review-sandbox.js'
 
@@ -601,7 +610,9 @@ test('the guarded delete uses the longer, bounded retry window and names the pat
   assert.ok(windowMs <= 15_000, `the total wait ${windowMs} ms must stay bounded`)
 
   const calls = []
+  const statePath = join(makeHolder(t, 'wf-iso-cleanup-state-'), 'pending.json')
   const removed = removeReviewSnapshot(snapshot, {
+    statePath,
     rm(path, options) {
       calls.push({ path, options })
       throw Object.assign(new Error('EPERM: still held by the reviewer test runner'), { code: 'EPERM' })
@@ -617,8 +628,17 @@ test('the guarded delete uses the longer, bounded retry window and names the pat
   assert.equal(calls[0].options.retryDelay, retryDelay, 'the exported window is the one used')
   assert.equal(removed.ok, false)
   assert.equal(removed.kept, true)
-  assert.equal(removed.path, snapshot.workDir, 'a kept copy must be findable by path')
+  // THE ROOT, NOT THE COPY. The root is the unit this plugin created and the unit a human has to
+  // delete; naming `.../work` pointed at a path that is usually already gone.
+  assert.equal(removed.path, snapshot.rootDir, 'a kept snapshot must be findable by its root')
+  assert.equal(removed.workDir, snapshot.workDir, 'the copy path is still reported separately')
+  assert.equal(removed.janitor, true, 'a live-handle failure is the janitor-eligible class')
   assert.match(removed.reason, /could not be removed/)
+  assert.ok(
+    typeof removed.remedy === 'string' && removed.remedy.includes(snapshot.rootDir),
+    'the report must carry a copy-paste command naming the root',
+  )
+  assert.match(removed.remedy, /Remove-Item -LiteralPath/)
   assert.equal(existsSync(snapshot.workDir), true, 'the copy is still there for the human to delete')
 
   // THE ROOT GETS THE SAME WINDOW, AND THAT IS A SEPARATE CALL. The 2026-11-01 re-review found
@@ -1028,4 +1048,403 @@ test('a project root swapped for a junction is not restored through', t => {
   assert.equal(fence.rootSwapped, true, 'the fence must name the root swap, not report a plain deletion')
   assert.deepEqual(fence.restored, [], 'nothing is restored into a directory that is no longer the project')
   assert.deepEqual(readdirSync(holder), [], 'nothing was written through the swapped root')
+})
+
+// ---------------------------------------------------------------------------
+// the snapshot cap, its exclusions, and the evidence they owe the reader
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT THESE PIN: the caps were hard-coded, there was no way to exclude a regenerable
+// directory, and an over-cap refusal printed ONE NUMBER. A real review refused because of
+// `node_modules` and the report left the reader to guess which directory was responsible.
+// Excluding a path narrows the fence, so the evidence must say which paths it narrowed over.
+
+test('a snapshot excludes the configured paths and reports every one of them', t => {
+  const project = makeProject(t)
+  mkdirSync(join(project, 'node_modules', 'pkg'), { recursive: true })
+  writeFileSync(join(project, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1\n')
+  const snapshot = createReviewSnapshot(project)
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+
+  assert.equal(existsSync(join(snapshot.workDir, 'node_modules')), false, 'an excluded directory is not copied')
+  assert.deepEqual(snapshot.exclude.patterns, ['node_modules'], 'the default exclusion is reported')
+  assert.deepEqual(snapshot.exclude.paths, ['node_modules'], 'the excluded PATH is reported, not just the setting')
+  assert.equal(snapshot.exclude.total, 1)
+  assert.equal(snapshot.files, snapshot.baseline.size, 'the baseline counts only what was copied')
+
+  // `.git` IS NOT EXCLUDED AND IS STILL CONTENT-HASHED: the fence is both the detection and the
+  // restore basis for the project's history, so a change there must be a MODIFICATION.
+  assert.ok(snapshot.baseline.has('.git/HEAD'), '.git stays in the snapshot')
+  assert.equal(typeof snapshot.baseline.get('.git/HEAD').hash, 'string', '.git content is hashed')
+  writeFileSync(join(project, '.git', 'HEAD'), 'ref: refs/heads/other\n')
+  const fence = verifyReviewSnapshot(snapshot)
+  assert.ok(fence.modified.includes('.git/HEAD'), `a .git content change is a modification: ${fence.modified.join(',')}`)
+
+  // THE DOCUMENTED COST: a change under an excluded path is invisible to the fence. This is why
+  // the exclusion is reported — the review must never imply it verified the whole tree.
+  writeFileSync(join(project, 'node_modules', 'pkg', 'index.js'), 'module.exports = 2\n')
+  assert.equal(verifyReviewSnapshot(snapshot).clean, false, 'the .git modification still fails the fence')
+})
+
+test('an explicit empty exclusion list means "exclude nothing", not "use the default"', t => {
+  const project = makeProject(t)
+  mkdirSync(join(project, 'node_modules'), { recursive: true })
+  writeFileSync(join(project, 'node_modules', 'x.js'), 'x\n')
+  const snapshot = createReviewSnapshot(project, { exclude: [] })
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+
+  assert.deepEqual(snapshot.exclude.patterns, [], 'no exclusion was asked for')
+  assert.ok(snapshot.baseline.has('node_modules/x.js'), 'the whole tree is snapshotted')
+  assert.equal(verifyReviewSnapshot(snapshot).clean, true)
+})
+
+test('the isolation evidence names what was excluded, so the narrowed fence is never silent', async t => {
+  const project = makeProject(t)
+  mkdirSync(join(project, 'node_modules'), { recursive: true })
+  writeFileSync(join(project, 'node_modules', 'x.js'), 'x\n')
+  const { service } = reviewerThat()
+  const outcome = await runReviewWithCleanup(t, {
+    feature: 'a change',
+    parent: { id: 'parent-1' },
+    subagents: service,
+    workspaceDir: project,
+    config: { bar: 8 },
+  })
+  assert.equal(outcome.isolation.caps.maxMb, 512, 'the default cap travels with the evidence')
+  assert.equal(outcome.isolation.caps.maxFiles, 20000)
+  assert.deepEqual(outcome.isolation.exclusions.patterns, ['node_modules'])
+  assert.deepEqual(outcome.isolation.exclusions.paths, ['node_modules'])
+
+  const text = renderIsolation(outcome.isolation).join('\n')
+  assert.match(text, /snapshot scope — capped at 512 MB \/ 20000 entries; exclude \[node_modules\]/)
+  assert.match(text, /EXCLUDED from the snapshot and the fence, so NOT verified: node_modules/)
+  assert.match(text, /would not be detected/)
+})
+
+test('an over-cap refusal lists the top directories and the remedy, not one number', t => {
+  const project = makeProject(t)
+  mkdirSync(join(project, 'large'))
+  writeFileSync(join(project, 'large', 'payload.bin'), Buffer.alloc(3 * 1024 * 1024, 0x41))
+  mkdirSync(join(project, 'small'))
+  writeFileSync(join(project, 'small', 'tiny.txt'), 'tiny\n')
+
+  const overBytes = createReviewSnapshot(project, { maxBytes: 2 * 1024 * 1024 })
+  assert.equal(overBytes.ok, false)
+  assert.match(overBytes.reason, /over the 2 MB cap/)
+  assert.match(overBytes.detail, /Largest directories:/)
+  assert.match(overBytes.detail, /large \(3\.0 MB\)/, `the largest directory is named: ${overBytes.detail}`)
+  assert.match(overBytes.detail, /review\.snapshot\.maxMb/)
+  assert.match(overBytes.detail, /review\.snapshot\.exclude/)
+  assert.match(overBytes.detail, /NOT verified/, 'the visibility cost of an exclusion is stated')
+
+  const overEntries = createReviewSnapshot(project, { maxFiles: 2 })
+  assert.equal(overEntries.ok, false)
+  assert.match(overEntries.reason, /-entry cap/)
+  assert.match(overEntries.detail, /Directories with the most entries:/)
+  assert.match(overEntries.detail, /review\.snapshot\.maxFiles/)
+})
+
+test('the two cap failures do not leak a snapshot directory', t => {
+  const project = makeProject(t)
+  mkdirSync(join(project, 'large'))
+  writeFileSync(join(project, 'large', 'payload.bin'), Buffer.alloc(2 * 1024 * 1024, 0x41))
+  const tempRoot = makeHolder(t, 'wf-iso-overcap-')
+  const before = readdirSync(tempRoot)
+  const failed = createReviewSnapshot(project, { maxBytes: 1024 * 1024, tempRoot })
+  assert.equal(failed.ok, false)
+  assert.deepEqual(readdirSync(tempRoot), before, 'a refused snapshot leaves no temp root behind')
+})
+
+// ---------------------------------------------------------------------------
+// the snapshot-cleanup janitor
+// ---------------------------------------------------------------------------
+
+/**
+ * Hand-build a snapshot root in the shape the sweep must recognise.
+ *
+ * THE MARKER AND CANARY ARE WRITTEN BY THE TEST, not by `createReviewSnapshot`, because the
+ * fixture needs a DEAD or a LIVE owner pid — exactly the fact the sweep must judge. Every fixture
+ * lives under a temp root the test creates and deletes; no real leftover is touched.
+ */
+function makeSweepableSnapshot(t, tempRoot, options = {}) {
+  const root = options.name === undefined
+    ? mkdtempSync(join(tempRoot, SNAPSHOT_ROOT_PREFIX))
+    : mkdtempSync(join(tempRoot, options.name))
+  const work = join(root, 'work')
+  mkdirSync(work, { recursive: true })
+  writeFileSync(join(work, 'a.js'), 'export const a = 1\n')
+  writeFileSync(join(root, SNAPSHOT_CANARY_NAME), 'canary\n')
+  const marker = {
+    plugin: 'dsh-workflow',
+    kind: 'review-snapshot',
+    projectDir: null,
+    pid: options.pid === undefined ? 0x7fffff0 : options.pid,
+    createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+    ...options.marker,
+  }
+  writeFileSync(join(root, SNAPSHOT_MARKER_NAME), `${JSON.stringify(marker, null, 2)}\n`)
+  t.after(() => {
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch {
+      // best effort
+    }
+  })
+  return root
+}
+
+test('the sweep removes a registered orphan snapshot and nothing else', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-temp-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-state-'), 'pending.json')
+  const orphan = makeSweepableSnapshot(t, tempRoot)
+  const unregistered = makeSweepableSnapshot(t, tempRoot)
+
+  const registered = registerPendingSnapshotCleanup({ rootDir: orphan, projectDir: null }, { statePath })
+  assert.equal(registered.ok, true, registered.reason)
+  assert.equal(readPendingSnapshots(statePath).entries.length, 1)
+
+  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  assert.equal(swept.ok, true)
+  assert.deepEqual(swept.removed, [orphan], 'the registered orphan is deleted')
+  assert.equal(existsSync(orphan), false)
+  assert.equal(existsSync(unregistered), true, 'an unregistered dsh-review-* directory is never touched')
+  assert.equal(readPendingSnapshots(statePath).entries.length, 0, 'the completed entry leaves the list')
+})
+
+test('the sweep never deletes a snapshot whose recorded owner is still alive', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-live-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-live-state-'), 'pending.json')
+  const live = makeSweepableSnapshot(t, tempRoot, { pid: process.pid })
+  registerPendingSnapshotCleanup({ rootDir: live }, { statePath })
+
+  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  assert.deepEqual(swept.removed, [])
+  assert.equal(existsSync(live), true, 'a live owner keeps its snapshot no matter how old it looks')
+  assert.match(swept.kept[0].reason, new RegExp(`pid ${process.pid} is still running`))
+  assert.equal(readPendingSnapshots(statePath).entries.length, 1, 'it stays pending for a later sweep')
+})
+
+test('the sweep never deletes by age alone: an ownerless marker is kept', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-age-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-age-state-'), 'pending.json')
+  // A day old (see makeSweepableSnapshot), but with no usable pid — so "old" is the only thing a
+  // bad sweep could act on, and it must not be enough.
+  const old = makeSweepableSnapshot(t, tempRoot, { marker: { pid: undefined } })
+  registerPendingSnapshotCleanup({ rootDir: old }, { statePath })
+
+  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  assert.deepEqual(swept.removed, [])
+  assert.equal(existsSync(old), true)
+  assert.match(swept.kept[0].reason, /no usable owner pid/)
+})
+
+test('the sweep refuses a root it was not told to look under, and one that is not a snapshot name', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-scope-')
+  const otherTemp = makeHolder(t, 'wf-iso-janitor-other-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-scope-state-'), 'pending.json')
+  const elsewhere = makeSweepableSnapshot(t, otherTemp)
+  const wrongName = makeSweepableSnapshot(t, tempRoot, { name: 'not-a-snapshot-' })
+  registerPendingSnapshotCleanup({ rootDir: elsewhere }, { statePath })
+  registerPendingSnapshotCleanup({ rootDir: wrongName }, { statePath })
+
+  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  assert.deepEqual(swept.removed, [])
+  assert.equal(existsSync(elsewhere), true, 'a root outside the temp root is kept')
+  assert.equal(existsSync(wrongName), true, 'a directory without the snapshot prefix is kept')
+  assert.equal(swept.kept.length, 2)
+})
+
+test('the sweep refuses a root whose marker is not this plugin\u2019s snapshot', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-marker-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-marker-state-'), 'pending.json')
+  const notOurs = makeSweepableSnapshot(t, tempRoot, { marker: { plugin: 'someone-else' } })
+  registerPendingSnapshotCleanup({ rootDir: notOurs }, { statePath })
+
+  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  assert.deepEqual(swept.removed, [])
+  assert.equal(existsSync(notOurs), true)
+  assert.match(swept.kept[0].reason, /does not name a dsh-workflow review snapshot/)
+})
+
+test('a failed removal is handed to the durable janitor, which can finish it later', t => {
+  const project = makeProject(t)
+  const tempRoot = makeHolder(t, 'wf-iso-discard-temp-')
+  const snapshot = createReviewSnapshot(project, { tempRoot })
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  const statePath = join(makeHolder(t, 'wf-iso-discard-state-'), 'pending.json')
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch {
+      // best effort
+    }
+  })
+
+  const kept = discardReviewSnapshot(snapshot, {
+    statePath,
+    rm() {
+      throw Object.assign(new Error('EPERM: still held'), { code: 'EPERM' })
+    },
+  })
+  assert.equal(kept.ok, false)
+  assert.equal(kept.kept, true)
+  assert.equal(kept.path, snapshot.rootDir, 'the report names the ROOT')
+  assert.equal(kept.pending.ok, true, 'the ROOT is recorded durably')
+
+  const pending = readPendingSnapshots(statePath)
+  assert.equal(pending.entries.length, 1)
+  assert.equal(pending.entries[0].rootDir, snapshot.rootDir)
+
+  // THE REVIEW PROCESS IS GONE BY THE TIME THE JANITOR RUNS. This test process created the
+  // snapshot, so its marker records a LIVE pid; a crash is simulated by rewriting that pid to one
+  // that cannot be running. Without this the sweep would (correctly) keep it forever.
+  const marker = JSON.parse(readFileSync(join(snapshot.rootDir, SNAPSHOT_MARKER_NAME), 'utf8'))
+  writeFileSync(
+    join(snapshot.rootDir, SNAPSHOT_MARKER_NAME),
+    `${JSON.stringify({ ...marker, pid: 0x7fffff0 }, null, 2)}\n`,
+  )
+
+  // The snapshot itself is still on disk (the seam deleted nothing); NOW the janitor finishes it.
+  const swept = sweepPendingSnapshots({ statePath, tempRoot })
+  assert.deepEqual(swept.removed, [snapshot.rootDir])
+  assert.equal(existsSync(snapshot.rootDir), false, 'the janitor completed what the review could not')
+})
+
+test('a guard REFUSAL is reported with the root and a command, but is never auto-swept', t => {
+  const project = makeProject(t)
+  const snapshot = createReviewSnapshot(project)
+  assert.equal(snapshot.ok, true, snapshot.reason)
+  const statePath = join(makeHolder(t, 'wf-iso-refusal-state-'), 'pending.json')
+  t.after(() => {
+    try {
+      rmSync(snapshot.rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+    } catch {
+      // best effort
+    }
+  })
+
+  // A canary refusal is a security decision, not a held handle: it must not be registered for
+  // automatic deletion, because the sweep cannot improve on "this root is not safe to delete".
+  rmSync(join(snapshot.rootDir, SNAPSHOT_CANARY_NAME), { force: true })
+  const refused = discardReviewSnapshot(snapshot, { statePath })
+  assert.equal(refused.kept, true)
+  assert.equal(refused.path, snapshot.rootDir)
+  assert.equal(refused.janitor, undefined, 'a guard refusal is not janitor-eligible')
+  assert.equal(existsSync(snapshot.rootDir), true)
+  assert.equal(readPendingSnapshots(statePath).entries.length, 0, 'the refusal is not queued for deletion')
+  assert.match(refused.remedy, /Remove-Item -LiteralPath/)
+})
+
+test('a contamination keep is evidence: it is never registered for the sweep', async t => {
+  const project = makeProject(t)
+  const statePath = join(makeHolder(t, 'wf-iso-contam-state-'), 'pending.json')
+  const { service } = reviewerThat(() => {
+    writeFileSync(join(project, 'REVIEWER-NOTES.md'), 'scratch\n')
+  })
+  const outcome = await runReviewWithCleanup(t, {
+    feature: 'a change',
+    parent: { id: 'parent-1' },
+    subagents: service,
+    workspaceDir: project,
+    isolation: { statePath },
+    config: { bar: 8 },
+  })
+  assert.equal(outcome.status, 'contaminated')
+  assert.equal(outcome.isolation.cleanup.kept, true)
+  assert.equal(readPendingSnapshots(statePath).entries.length, 0, 'the only remaining copy is never queued')
+  assert.equal(existsSync(outcome.isolation.cleanup.path), true)
+})
+
+test('the in-process retry is bounded and stops as soon as the list is empty', t => {
+  t.after(() => stopCleanupRetry())
+  const tempRoot = makeHolder(t, 'wf-iso-retry-temp-')
+  const statePath = join(makeHolder(t, 'wf-iso-retry-state-'), 'pending.json')
+  const orphan = makeSweepableSnapshot(t, tempRoot)
+  registerPendingSnapshotCleanup({ rootDir: orphan }, { statePath })
+
+  const timers = []
+  let now = 0
+  const controller = ensureCleanupRetry({
+    statePath,
+    tempRoot,
+    intervalMs: 30,
+    windowMs: 120,
+    setTimeout: (fn, ms) => {
+      const handle = { fn, ms, unref() {} }
+      timers.push(handle)
+      return handle
+    },
+    clearTimeout: handle => {
+      handle.cleared = true
+    },
+    now: () => now,
+  })
+  assert.equal(controller.started, true)
+  assert.equal(SNAPSHOT_CLEANUP_RETRY.intervalMs, 30_000, 'the shipped interval is the one documented')
+  assert.equal(SNAPSHOT_CLEANUP_RETRY.windowMs, 10 * 60_000)
+  assert.equal(timers.length, 1)
+
+  timers[0].fn()
+  assert.equal(controller.attempts, 1)
+  assert.equal(existsSync(orphan), false, 'the retry swept the orphan')
+  assert.equal(controller.stopped, true, 'an empty list stops the retry')
+  assert.equal(timers.length, 1, 'no further timer is scheduled')
+})
+
+test('the in-process retry gives up at the window instead of running forever', t => {
+  t.after(() => stopCleanupRetry())
+  const tempRoot = makeHolder(t, 'wf-iso-retry-window-temp-')
+  const statePath = join(makeHolder(t, 'wf-iso-retry-window-state-'), 'pending.json')
+  // A live owner: every sweep keeps it, so only the window can stop the retry.
+  const held = makeSweepableSnapshot(t, tempRoot, { pid: process.pid })
+  registerPendingSnapshotCleanup({ rootDir: held }, { statePath })
+
+  const timers = []
+  let now = 0
+  const controller = ensureCleanupRetry({
+    statePath,
+    tempRoot,
+    intervalMs: 30,
+    windowMs: 120,
+    setTimeout: (fn, ms) => {
+      const handle = { fn, ms, unref() {} }
+      timers.push(handle)
+      return handle
+    },
+    clearTimeout: () => {},
+    now: () => now,
+  })
+  assert.equal(controller.started, true)
+  assert.equal(ensureCleanupRetry({ statePath }).started, false, 'a second retry is never stacked')
+
+  timers[0].fn()
+  assert.equal(controller.attempts, 1)
+  assert.equal(controller.stopped, false, 'inside the window it keeps trying')
+  assert.equal(timers.length, 2)
+  now = 121
+  timers[1].fn()
+  assert.equal(controller.attempts, 2)
+  assert.equal(controller.stopped, true, 'the window is a hard bound')
+  assert.equal(existsSync(held), true)
+})
+
+test('the durable list path defaults under the OS temp directory and is injectable', () => {
+  assert.equal(dirname(defaultCleanupStatePath()), tmpdir())
+  const injected = join(tmpdir(), 'a-test-owned-cleanup-state.json')
+  assert.equal(readPendingSnapshots(injected).entries.length, 0, 'a missing list reads as empty, not as an error')
 })

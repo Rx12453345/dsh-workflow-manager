@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { resolveConfig, configWarnings, DEFAULT_CONFIG, mergeConfigLayers } from '../lib/config.js'
+import { resolveConfig, configWarnings, readReviewSnapshotConfig, DEFAULT_CONFIG, DEFAULT_REVIEW_SNAPSHOT, mergeConfigLayers } from '../lib/config.js'
 import { probeProject, parseWorkflowYaml } from '../lib/project.js'
 import {
   serializeWorkflowYaml,
@@ -492,4 +492,100 @@ test('toLosslessJson nulls non-finite numbers and survives cycles', () => {
   assert.equal(sanitised.i, null)
   assert.equal(sanitised.cyclic.self, '[circular]')
   assert.deepEqual(JSON.parse(JSON.stringify(sanitised)), sanitised)
+})
+
+// ---------------------------------------------------------------------------
+// review.snapshot: the configurable reviewer-snapshot cap and exclusions
+// ---------------------------------------------------------------------------
+
+test('review.snapshot resolves to the documented defaults when nothing is configured', () => {
+  const resolved = resolveConfig({})
+  assert.deepEqual(resolved.review.snapshot, {
+    maxMb: 512,
+    maxFiles: 20000,
+    exclude: ['node_modules'],
+  })
+  // The historical caps are preserved; only the default exclusion is new.
+  assert.equal(DEFAULT_REVIEW_SNAPSHOT.maxMb, 512)
+  assert.equal(DEFAULT_REVIEW_SNAPSHOT.maxFiles, 20000)
+
+  const reader = readReviewSnapshotConfig(undefined)
+  assert.equal(reader.maxMb, 512)
+  assert.equal(reader.maxFiles, 20000)
+  assert.deepEqual(reader.exclude, ['node_modules'])
+  assert.deepEqual(reader.problems, [], 'an absent section is not a problem')
+})
+
+test('review.snapshot accepts a project override and deep-merges it over the defaults', () => {
+  const resolved = resolveConfig({ review: { snapshot: { maxMb: 64 } } })
+  assert.equal(resolved.review.snapshot.maxMb, 64, 'the override wins')
+  assert.equal(resolved.review.snapshot.maxFiles, 20000, 'a sibling default survives the merge')
+
+  const reader = readReviewSnapshotConfig({ maxMb: 64, maxFiles: 10, exclude: ['dist', 'node_modules'] })
+  assert.equal(reader.maxMb, 64)
+  assert.equal(reader.maxFiles, 10)
+  assert.deepEqual(reader.exclude, ['dist', 'node_modules'])
+  assert.deepEqual(reader.problems, [])
+})
+
+test('an explicit empty exclusion list is honoured, and is not the default', () => {
+  const reader = readReviewSnapshotConfig({ exclude: [] })
+  assert.deepEqual(reader.exclude, [], 'the user asked for the whole tree, and gets it')
+  assert.deepEqual(reader.problems, [])
+})
+
+test('an unusable snapshot value falls back on the safe side and says so', () => {
+  // A BAD CAP MUST NEVER MEAN "NO CAP": the default cap is smaller than anything a typo could
+  // intend by accident, and "verify more, copy less" is the safe direction.
+  for (const bad of ['999', -1, 0, Number.NaN, {}]) {
+    const cap = readReviewSnapshotConfig({ maxMb: bad })
+    assert.equal(cap.maxMb, 512, `maxMb ${JSON.stringify(bad)} falls back to 512`)
+    assert.equal(cap.usable, false)
+    assert.match(cap.problems.join(' '), /review\.snapshot\.maxMb/)
+  }
+  for (const bad of ['20000', 2.5, 0, -3]) {
+    const files = readReviewSnapshotConfig({ maxFiles: bad })
+    assert.equal(files.maxFiles, 20000, `maxFiles ${JSON.stringify(bad)} falls back to 20000`)
+  }
+
+  // AN UNUSABLE EXCLUSION IS DROPPED, so the path is snapshotted and verified instead: dropping
+  // it can only make the fence stronger. A wildcard is dropped too, because a pattern the reader
+  // does not implement would silently exclude nothing while the setting looked honoured.
+  const excluded = readReviewSnapshotConfig({ exclude: ['dist', '../secrets', '/abs', 'C:/x', 'a*b', './build/', 'build'] })
+  assert.deepEqual(excluded.exclude, ['dist', 'build'], 'only usable entries survive')
+  assert.equal(excluded.problems.length, 4, `one problem per dropped entry: ${excluded.problems.join(' | ')}`)
+  assert.equal(
+    excluded.problems.every(problem => problem.includes('review.snapshot.exclude')),
+    true,
+  )
+
+  const notASection = readReviewSnapshotConfig('nonsense')
+  assert.equal(notASection.maxMb, 512)
+  assert.equal(notASection.usable, false)
+  assert.match(notASection.problems[0], /expected a section/)
+})
+
+test('configWarnings reports an unusable review.snapshot section', () => {
+  const warnings = configWarnings(resolveConfig({ review: { snapshot: { maxMb: 'big', exclude: ['../x'] } } }))
+  assert.ok(
+    warnings.some(warning => warning.includes('review snapshot') && warning.includes('maxMb')),
+    `the cap problem is reported: ${warnings.join(' | ')}`,
+  )
+  assert.ok(
+    warnings.some(warning => warning.includes('review snapshot') && warning.includes('exclude')),
+    'the exclusion problem is reported',
+  )
+  assert.equal(
+    configWarnings(resolveConfig({})).some(warning => warning.includes('review snapshot')),
+    false,
+    'the defaults produce no warning',
+  )
+
+  // A section that is not an object at all is reported too, rather than silently replaced by the
+  // defaults through an optional chain that would read `undefined.snapshot`.
+  const sectionWarnings = configWarnings(resolveConfig({ review: 'nonsense' }))
+  assert.ok(
+    sectionWarnings.some(warning => warning.startsWith('review is ') && warning.includes('expected a section')),
+    `a malformed review section is reported: ${sectionWarnings.join(' | ')}`,
+  )
 })

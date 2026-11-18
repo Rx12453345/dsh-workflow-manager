@@ -145,9 +145,11 @@ tools require the extracted host packages, because those bundles are not vendore
 The suite must be green in both environments. **The failure count is the number that must be zero;
 test counts drift as work lands, so they are not restated here.** In a normal terminal the only skip
 is a Windows limitation (the platform has no catchable `SIGTERM`), not a failing case. In the DSH
-sandbox the runner sets `DSH_WORKFLOW_SANDBOX=1`, so the environment-dependent tests skip as well —
-the ones that need a piped child (denied with `EPERM`) or the Chromium layout browser — and each skip
-is reported with its reason rather than counted as a pass.
+sandbox the runner sets `DSH_WORKFLOW_SANDBOX=1`, so the environment-dependent test skips as well —
+the Chromium layout browser — and each skip is reported with its reason rather than counted as a
+pass. **The mutation-lock cases no longer skip in the sandbox**: they capture their children through
+file descriptors instead of pipes (see §1.1), so the sandbox limitation that used to hide five of
+them is gone.
 
 ### 1.1 What the DSH sandbox does NOT run — a skip is not a pass
 
@@ -164,12 +166,16 @@ cases then call `t.skip()` with a visible reason. **They are NOT RUN. They are n
   still run, but **the rendered outcome is unmeasured in the sandbox**. In a normal terminal with a
   Chromium-family browser it runs; without one it skips with its own reason
   (`no Chromium-family browser on this machine; the resolved layout was not computed`).
-- **The PIPED mutation-lock race cases are NOT RUN in the sandbox.** The cases in
-  `test/mutation-lock.test.mjs` that read their children through pipes are denied them (`EPERM`) and
-  skip by name. The **pipe-free** race case is the exception and must PASS there: its children are
-  spawned with `stdio: 'ignore'` and report through files, which is why it exists — the race it
-  reproduces (two winners on an empty lock) reached CI precisely because the piped variant only ever
-  ran there.
+- **The PIPED mutation-lock cases now RUN in the sandbox, because the pipe is gone.** The cases in
+  `test/mutation-lock.test.mjs` that used to skip capture their children through **file descriptors**
+  instead: `tooling/child-output.mjs` `runCaptured` for the `spawnSync` children, and opened stdout/
+  stderr file descriptors as `stdio` for the async ones (the poll-for-`ACQUIRED` helper reads the
+  child's file). The assertions did not change. The **pipe-free race case** that was written first
+  (`stdio: 'ignore'` plus result files) still runs and still exists for the race it reproduces (two
+  winners on an empty lock, CI 41275458335). **The SIGTERM case still skips on Windows and nowhere
+  else**: Node maps `kill('SIGTERM')` to `TerminateProcess`, so no JS handler can run — and CI is
+  Windows-only, so that case **never executes there**. The recovery path (a hard kill leaves the
+  lock, the next run takes it over) is what runs instead and has its own cases.
 - **Everything else runs**, including `test/review.test.mjs`, `test/review-isolation.test.mjs`,
   `test/governance.test.mjs`, `test/approval.test.mjs` and the rest of `test/status.test.mjs`: they
   do not need a pipe or a browser. The harnesses that capture a child at all do it through temp

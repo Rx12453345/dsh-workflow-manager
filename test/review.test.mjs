@@ -831,9 +831,16 @@ test('runReview reports a start failure instead of throwing', async () => {
   assert.equal(outcome.passed, false)
   assert.equal(outcome.status, 'unavailable')
   assert.match(outcome.detail, /NO_PROVIDER/)
-  // THE STACK IS PART OF THE REFUSAL NOW. A one-line message is what made this failure take
-  // two live rounds to place; the assertion is on the frame marker, not on a path.
-  assert.match(outcome.detail, /\n\s+at /, 'a start failure keeps a few stack frames')
+  // THE STACK IS PART OF THE REFUSAL NOW, AND IT IS FOUR REAL FRAMES. An Error's stack starts
+  // with its "<Name>: <message>" header; the old `slice(0, 4)` spent one of the four slots
+  // repeating the message, so the report claimed four frames and carried three. The two
+  // properties are asserted separately: FOUR lines matching the frame prefix, and the message
+  // appearing EXACTLY ONCE in the whole detail.
+  const frameLines = outcome.detail.split('\n').filter(line => /^\s+at /.test(line))
+  assert.equal(frameLines.length, 4, `four real stack frames: ${JSON.stringify(frameLines)}`)
+  const occurrences = outcome.detail.split('no such provider').length - 1
+  assert.equal(occurrences, 1, 'the message must not be duplicated by the stack header')
+  assert.doesNotMatch(outcome.detail.split('\n')[1] ?? '', /^Error: /, 'the second line is a frame, not the header')
 })
 
 test('an unparseable reviewer reply fails the gate with the raw text preserved', async () => {
@@ -2038,17 +2045,17 @@ test('the audit says "contradicted", not "CLASS REFUSED", under advisory', () =>
 })
 
 test('harness selection follows the depth, not a hardcoded list', () => {
-  const depth0 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.UNIT, files: ['lib/tools.js'] })
+  const depth0 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.UNIT, files: ['lib/tools.js'], projectDir: repoRoot })
   assert.deepEqual(depth0.required, [], 'depth 0 implies no mutation harness')
 
-  const depth1 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESS, files: ['lib/client.js'] })
+  const depth1 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESS, files: ['lib/client.js'], projectDir: repoRoot })
   assert.equal(depth1.required.length, 1)
   // The ONE harness for the browser half must be the browser harness, not the alphabetically first
   // covering one — that earlier bug selected the approval harness for a client.js change.
   assert.equal(depth1.required[0], 'mutation-check-client.mjs')
   assert.ok(depth1.covering.length > 1, 'the other client harnesses must still be listed as covering')
 
-  const depth2 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESSES, files: ['lib/tools.js'] })
+  const depth2 = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESSES, files: ['lib/tools.js'], projectDir: repoRoot })
   // `mutation-check-handoff.mjs` is a covering harness for lib/tools.js because it injects the
   // dropped-stale-count defect into the status summary; discovery reads that from its mutants, so
   // the new harness is required here rather than silently omitted. `mutation-check-state.mjs` joined
@@ -2065,7 +2072,7 @@ test('harness selection follows the depth, not a hardcoded list', () => {
   // The governance harness declares BOTH governance files, so a change to either one names it in
   // the harness plan rather than silently resolving to "the unit suite covers this".
   for (const file of ['lib/tools.js', 'lib/advance.js']) {
-    const plan = harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: [file] })
+    const plan = harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: [file], projectDir: repoRoot })
     assert.ok(
       plan.required.includes('mutation-check-governance.mjs'),
       `the governance harness must cover ${file}; got ${plan.required.join(', ')}`,
@@ -2074,7 +2081,7 @@ test('harness selection follows the depth, not a hardcoded list', () => {
 
   // Every covering harness includes the verification-depth harness's CFG/REVIEW/TOOLS targets.
   for (const file of ['lib/config.js', 'lib/review.js', 'lib/tools.js']) {
-    const plan = harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: [file] })
+    const plan = harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: [file], projectDir: repoRoot })
     assert.ok(
       plan.required.includes('mutation-check-verification.mjs'),
       `the verification harness must cover ${file}; got ${plan.required.join(', ')}`,
@@ -2084,7 +2091,7 @@ test('harness selection follows the depth, not a hardcoded list', () => {
   // The constraints harness has no hyphen after `mutation-check`; discovery must see it,
   // and its C/G target constants must map to lib/constraints.js and lib/gc.js.
   for (const file of ['lib/constraints.js', 'lib/gc.js']) {
-    const plan = harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: [file] })
+    const plan = harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: [file], projectDir: repoRoot })
     assert.ok(
       plan.required.includes('mutation-check.mjs'),
       `the constraints harness must cover ${file}; got ${plan.required.join(', ')}`,
@@ -2092,17 +2099,100 @@ test('harness selection follows the depth, not a hardcoded list', () => {
   }
 
   // No file list: nothing can be selected, and that is REPORTED as a gap rather than as a clean skip.
-  const noFiles = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESSES, files: [] })
+  const noFiles = harnessesForDepth({ depth: VERIFICATION_DEPTHS.HARNESSES, files: [], projectDir: repoRoot })
   assert.deepEqual(noFiles.required, [])
   assert.match(noFiles.note, /no changed files/i)
 
   // Discovery must not silently lose a harness it does not understand.
-  const discovered = discoverMutationHarnesses()
+  const discovered = discoverMutationHarnesses({ projectDir: repoRoot })
   assert.equal(discovered.unreadable, false)
   assert.ok(discovered.harnesses.length >= 4, 'the real harnesses must be discovered')
   for (const harness of discovered.harnesses) {
     assert.ok(harness.targets.length > 0, `${harness.name} must declare at least one target`)
   }
+})
+
+test('harness discovery is scoped to the reviewed project and never borrows the installation', t => {
+  // THE DEFECT THIS PINS. Discovery read `tooling/` next to the INSTALLED plugin, so a review of
+  // an external project was told to run this plugin's own harness suite. The correct answers for
+  // an external project are "its own table" and "no table at all", never "the installation's".
+  const external = mkdtempSync(join(tmpdir(), 'dsh-wf-external-'))
+  t.after(() => {
+    try {
+      rmSync(external, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+  // The file IS covered by this repository's own table — so a fallback would be visible.
+  assert.ok(
+    harnessesForDepth({ depth: VERIFICATION_DEPTHS.INDEPENDENT, files: ['lib/approval.js'], projectDir: repoRoot })
+      .required.includes('mutation-check-approval.mjs'),
+    'the file is a real target for the installation table (the control for this case)',
+  )
+
+  const discovered = discoverMutationHarnesses({ projectDir: external })
+  assert.equal(discovered.unreadable, false, 'a missing tooling/ is not an unreadable one')
+  assert.equal(discovered.absent, true, 'a project with no tooling/ has no harness table')
+  assert.deepEqual(discovered.harnesses, [], 'no harness is discovered outside the project')
+
+  const plan = harnessesForDepth({
+    depth: VERIFICATION_DEPTHS.INDEPENDENT,
+    files: ['lib/approval.js'],
+    projectDir: external,
+  })
+  assert.deepEqual(plan.required, [], 'an external project resolves NO harnesses')
+  assert.match(plan.note, /this project has no harness table/)
+  assert.match(plan.note, /never borrowed/)
+
+  // A tooling/ directory exists but carries no mutation-check-*.mjs: still "no harness table",
+  // not "no harness covers these files".
+  mkdirSync(join(external, 'tooling'))
+  writeFileSync(join(external, 'tooling', 'unrelated.mjs'), 'export const x = 1\n')
+  const emptyTable = harnessesForDepth({
+    depth: VERIFICATION_DEPTHS.INDEPENDENT,
+    files: ['lib/approval.js'],
+    projectDir: external,
+  })
+  assert.deepEqual(emptyTable.required, [])
+  assert.match(emptyTable.note, /this project has no harness table/)
+})
+
+test('a harness target matches a project-relative path, never a basename in another directory', t => {
+  const project = mkdtempSync(join(tmpdir(), 'dsh-wf-scoped-'))
+  t.after(() => {
+    try {
+      rmSync(project, { recursive: true, force: true })
+    } catch {
+      // best effort
+    }
+  })
+  mkdirSync(join(project, 'tooling'))
+  mkdirSync(join(project, 'lib'))
+  mkdirSync(join(project, 'other', 'lib'), { recursive: true })
+  writeFileSync(join(project, 'lib', 'x.js'), 'export const x = 1\n')
+  writeFileSync(join(project, 'other', 'lib', 'x.js'), 'export const x = 2\n')
+  writeFileSync(
+    join(project, 'tooling', 'mutation-check-x.mjs'),
+    "const FILE = 'lib/x.js'\n",
+  )
+
+  const covering = harnessesForDepth({
+    depth: VERIFICATION_DEPTHS.INDEPENDENT,
+    files: ['lib/x.js'],
+    projectDir: project,
+  })
+  assert.deepEqual(covering.required, ['mutation-check-x.mjs'], 'the declared path is covered')
+
+  // THE SAME BASENAME IN ANOTHER DIRECTORY DOES NOT MATCH. The old rule compared basenames, so
+  // `other/lib/x.js` earned the harness name (and its green run) without being read by it.
+  const sameName = harnessesForDepth({
+    depth: VERIFICATION_DEPTHS.INDEPENDENT,
+    files: ['other/lib/x.js'],
+    projectDir: project,
+  })
+  assert.deepEqual(sameName.required, [], 'a same-named file in another directory must not match')
+  assert.match(sameName.note, /no mutation harness in tooling\/ covers/)
 })
 
 test('the shipped package includes tooling/, so an installed copy can read the harness table', () => {
@@ -2111,6 +2201,10 @@ test('the shipped package includes tooling/, so an installed copy can read the h
   // package SHIPS the table `review.js` keys on, not that the reader pretends a missing
   // directory means "no harness covers these files". `npm pack` is deliberately not run here:
   // the regression is the `files` entry plus a resolution against the real directory.
+  //
+  // SINCE 0.4.0 THE TABLE READ FOR A REVIEW IS THE REVIEWED PROJECT'S OWN `tooling/`, so this
+  // seam is what an explicit caller (and this test) uses to name a table. The package still ships
+  // this repository's table: it is the table a review OF THIS REPOSITORY reads.
   const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8'))
   assert.ok(Array.isArray(pkg.files), 'package.json must declare a files list')
   assert.ok(pkg.files.includes('tooling'), 'tooling/ must be shipped in the installed package')
@@ -2167,14 +2261,14 @@ test('an unreadable harness directory is reported as a gap, not as "no coverage"
   assert.match(plan.unmapped[0], /could not be read/)
 
   // The healthy case is NOT flagged, so the flag is not simply always true.
-  assert.equal(discoverMutationHarnesses().unreadable, false)
+  assert.equal(discoverMutationHarnesses({ projectDir: repoRoot }).unreadable, false)
 })
 
 test('the depth is stated to the reviewer, including what it skipped', () => {
   const security = resolveVerificationDepth({ declaredClass: 'docs', changedFiles: ['lib/approval.js'] })
   const audit = buildVerificationAudit(security, {
     policy: 'enforced',
-    harnesses: harnessesForDepth({ depth: security.depth, files: security.files }),
+    harnesses: harnessesForDepth({ depth: security.depth, files: security.files, projectDir: repoRoot }),
   })
   const prompt = buildReviewPrompt({ feature: 'x', verification: audit })
 
