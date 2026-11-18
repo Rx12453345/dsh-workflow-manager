@@ -831,6 +831,9 @@ test('runReview reports a start failure instead of throwing', async () => {
   assert.equal(outcome.passed, false)
   assert.equal(outcome.status, 'unavailable')
   assert.match(outcome.detail, /NO_PROVIDER/)
+  // THE STACK IS PART OF THE REFUSAL NOW. A one-line message is what made this failure take
+  // two live rounds to place; the assertion is on the frame marker, not on a path.
+  assert.match(outcome.detail, /\n\s+at /, 'a start failure keeps a few stack frames')
 })
 
 test('an unparseable reviewer reply fails the gate with the raw text preserved', async () => {
@@ -2470,6 +2473,11 @@ function passingTerminal() {
 /**
  * The CURRENT host's service shape: `startActivation(spec)` and no `start`.
  * The receipt still has `result`/`dispose`, which is the contract the review needs.
+ *
+ * THE MOCK ENFORCES THE HOST'S FIRST TWO READS, ON PURPOSE. The host evaluates
+ * `spec.parent.id` before it starts anything and hands `spec.prompt` to the child's
+ * inbox; a fake that accepted a nested `request` accepted a shape the real host crashes
+ * on, which is how the nested-request defect reached a live host with a green suite.
  */
 function activationOnlySubagents() {
   const calls = { started: 0, spec: null, disposed: 0 }
@@ -2479,6 +2487,12 @@ function activationOnlySubagents() {
       async startActivation(spec) {
         calls.started += 1
         calls.spec = spec
+        if (spec?.parent === undefined) {
+          throw new TypeError("Cannot read properties of undefined (reading 'id')")
+        }
+        if (!Array.isArray(spec.prompt)) {
+          throw new TypeError('the initial prompt must be a content-block array')
+        }
         return {
           result: Promise.resolve(passingTerminal()),
           async dispose() {
@@ -2719,7 +2733,8 @@ test('workflow_review uses startActivation when the host exposes only that API',
   // `startActivation(spec)` and no `start`; the first A1 fix required `start()` and
   // therefore rejected the real service. The receipt is still `{ result, dispose }`, and
   // the child's structured result still arrives through `result`, so only the start call
-  // has to adapt.
+  // has to adapt. THE SPEC IS FLAT: `prompt` and `parent` are top-level, and the fake
+  // above now rejects the nested shape the real host crashed on.
   const dir = makeVerificationProject('tier: standard\n')
   try {
     const { calls, service } = activationOnlySubagents()
@@ -2743,10 +2758,14 @@ test('workflow_review uses startActivation when the host exposes only that API',
     assert.equal(calls.started, 1, 'the reviewer must start through startActivation')
     assert.equal(calls.spec.provider, 'spawn')
     assert.equal(calls.spec.delivery, 'caller', 'a review is a one-shot caller-owned activation')
-    assert.equal(calls.spec.request.parent.id, 'agent-1', 'the exact calling agent must be the parent')
-    assert.equal(calls.spec.request.outputSchema.type, 'object')
+    assert.equal(calls.spec.parent.id, 'agent-1', 'the exact calling agent must be the parent')
+    assert.equal(calls.spec.prompt[0]?.type, 'text', 'the prompt is a top-level content-block array')
+    assert.equal(calls.spec.outputSchema.type, 'object')
     assert.equal(typeof calls.spec.signal?.throwIfAborted, 'function')
     assert.equal(calls.disposed, 1, 'the activation must be disposed after the review')
+    // THE REGRESSION GUARD. The spec must stay flat: a nested `request` is exactly the
+    // shape that made every live review return `unavailable` with a bare TypeError.
+    assert.equal(calls.spec.request, undefined, 'the host spec is flat; a nested request is the defect this test guards')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
