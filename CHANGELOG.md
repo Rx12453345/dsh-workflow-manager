@@ -3,7 +3,7 @@
 All notable changes to this project are documented here.
 Entries are grouped by the date the work landed; the version line is the one recorded in `package.json`.
 
-Version recorded in `package.json`: **0.4.0**.
+Version recorded in `package.json`: **0.5.0**.
 
 `0.3.0` is the **recovered checkout**: the tree rebuilt from the session logs (see
 [`docs/RECOVERY.md`](docs/RECOVERY.md)) plus the P3 changes. It was **deployed as 0.3.0 on
@@ -20,7 +20,7 @@ live until it has been synced and DSH restarted.
 
 ---
 
-## [Unreleased] — 2026-11-18 (0.4.0)
+## [0.5.0] — 2026-11-19
 
 ### Fixed — the review snapshot stops being a fixed-size blind spot
 
@@ -96,7 +96,7 @@ live until it has been synced and DSH restarted.
   work tree, a `git init`ed `src`, a file-backed runner because the sandbox denies a piped child —
   and asserts the mapped `src/x.js`, a complete checked comparison and `mismatch: false`.
 
-`package.json` stays **0.4.0**.
+`package.json` is now **0.5.0**.
 
 ---
 
