@@ -34,7 +34,7 @@ import {
   renderIsolation,
   boundedReviewIssues,
 } from '../lib/review.js'
-import { buildReviewToolDefinition } from '../lib/tools.js'
+import { buildReviewToolDefinition, renderVerificationStatus } from '../lib/tools.js'
 import {
   CHANGE_CLASSES,
   CHANGE_CLASS_IDS,
@@ -2251,6 +2251,30 @@ test('the reviewer prompt says what the snapshot covers, and names the exclusion
   assert.doesNotMatch(unsandboxed, /IS IN THE SNAPSHOT/)
 })
 
+test('the verification status names the REVIEWED project\'s harness table, not "this installation"', () => {
+  // Harness discovery reads the reviewed project's own `tooling/` since 0.4.0, so the old
+  // sentence named the wrong subject: a project with no readable table looked like a broken
+  // INSTALLATION, which sent the reader to reinstall the plugin instead of looking at the
+  // project. The status line must name the table that was actually read (or not read).
+  const text = renderVerificationStatus({
+    policy: 'advisory',
+    confirmation: 'on-override',
+    classification: {},
+    resolution: {
+      resolved: 'security',
+      depth: 3,
+      declared: 'security',
+      evidence: 'changed_files',
+      files: ['lib/approval.js'],
+      requiredHarnesses: [],
+      harnessNote: 'the harness table could not be read',
+      harnessUnreadable: true,
+    },
+  }).join('\n')
+  assert.match(text, /the reviewed project\u2019s mutation harness table is UNREADABLE/)
+  assert.doesNotMatch(text, /in this installation/)
+})
+
 test('an unreadable harness table is carried into the audit, not read as "no coverage"', () => {
   const plan = harnessesForDepth({
     depth: VERIFICATION_DEPTHS.INDEPENDENT,
@@ -2894,6 +2918,126 @@ test('workflow_review uses startActivation when the host exposes only that API',
     // THE REGRESSION GUARD. The spec must stay flat: a nested `request` is exactly the
     // shape that made every live review return `unavailable` with a bare TypeError.
     assert.equal(calls.spec.request, undefined, 'the host spec is flat; a nested request is the defect this test guards')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('workflow_review probes evaluator.provider and refuses when the service lacks it', async () => {
+  // THE PROBE IS A REFUSAL BEFORE ANYTHING IS SPENT. `getProvider(name)` is the only provider
+  // query the host exposes — there is no registry listing — so a configured name that returns
+  // nothing must stop the review with an actionable message instead of becoming an opaque start
+  // failure. The reviewer must never be started in that case.
+  const dir = makeVerificationProject('tier: standard\n')
+  try {
+    const calls = { started: 0, probed: [] }
+    const service = {
+      getProvider(name) {
+        calls.probed.push(name)
+        return undefined
+      },
+      async start() {
+        calls.started += 1
+        return { result: Promise.resolve(passingTerminal()), dispose: async () => {} }
+      },
+    }
+    const def = buildReviewToolDefinition({ config: resolveConfig({}) })
+    const result = await def.execute(
+      { feature: 'missing provider', acceptance: ['works'] },
+      verificationExec(dir, { subagents: service }),
+    )
+    assert.equal(result.ok, false)
+    assert.equal(result.status, 'provider-unavailable')
+    assert.equal(result.passed, false)
+    assert.deepEqual(calls.probed, ['spawn'], 'the configured name is the one probed')
+    assert.equal(calls.started, 0, 'no reviewer may start on a provider the service does not have')
+    assert.match(result.reason, /evaluator\.provider is "spawn"/)
+    assert.match(result.reason, /getProvider\("spawn"\)/)
+    // The message must be HONEST about what the host exposes: no registry exists to enumerate.
+    assert.match(result.reason, /cannot list/)
+    assert.match(result.reason, /getProvider\(name\), not a registry/)
+    assert.match(result.reason, /No reviewer was started/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a configured provider that getProvider resolves is threaded to the review start', async () => {
+  const dir = makeVerificationProject('tier: standard\n')
+  try {
+    const calls = { started: 0, provider: null, probed: [] }
+    const service = {
+      getProvider(name) {
+        calls.probed.push(name)
+        return name === 'custom-provider' ? { id: 'custom-provider' } : undefined
+      },
+      async start(provider) {
+        calls.started += 1
+        calls.provider = provider
+        return { result: Promise.resolve(passingTerminal()), dispose: async () => {} }
+      },
+    }
+    const def = buildReviewToolDefinition({
+      config: resolveConfig({ evaluator: { provider: 'custom-provider' } }),
+    })
+    const result = await def.execute(
+      { feature: 'configured provider', acceptance: ['works'] },
+      verificationExec(dir, { subagents: service }),
+    )
+    assert.equal(result.status, 'reviewed', JSON.stringify(result).slice(0, 300))
+    assert.equal(calls.started, 1)
+    assert.deepEqual(calls.probed, ['custom-provider'])
+    assert.equal(calls.provider, 'custom-provider', 'evaluator.provider must reach the start call')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('an empty evaluator.provider falls back to spawn for BOTH the probe and the start', async () => {
+  // The probe treated `''` as `spawn` but the start call used to pass `''` through, so the
+  // reviewer failed with the opaque "could not start the reviewer on provider \"\"" that the
+  // probe exists to prevent. One computed name must drive both calls.
+  const dir = makeVerificationProject('tier: standard\n')
+  try {
+    const calls = { started: 0, probed: [], provider: null }
+    const service = {
+      getProvider(name) {
+        calls.probed.push(name)
+        return name === 'spawn' ? { id: 'spawn' } : undefined
+      },
+      async start(provider) {
+        calls.started += 1
+        calls.provider = provider
+        return { result: Promise.resolve(passingTerminal()), dispose: async () => {} }
+      },
+    }
+    const def = buildReviewToolDefinition({
+      config: resolveConfig({ evaluator: { provider: '' } }),
+    })
+    const result = await def.execute(
+      { feature: 'empty provider', acceptance: ['works'] },
+      verificationExec(dir, { subagents: service }),
+    )
+    assert.equal(result.status, 'reviewed', JSON.stringify(result).slice(0, 300))
+    assert.deepEqual(calls.probed, ['spawn'], 'the probe uses the fallback name')
+    assert.equal(calls.provider, 'spawn', 'the start uses the SAME fallback name the probe checked')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a service without getProvider keeps the historical review path', async () => {
+  const dir = makeVerificationProject('tier: standard\n')
+  try {
+    const { calls, service } = passingSubagents()
+    assert.equal(typeof service.getProvider, 'undefined')
+    const def = buildReviewToolDefinition({ config: resolveConfig({}) })
+    const result = await def.execute(
+      { feature: 'no provider probe', acceptance: ['works'] },
+      verificationExec(dir, { subagents: service }),
+    )
+    assert.equal(result.status, 'reviewed', JSON.stringify(result).slice(0, 300))
+    assert.equal(calls.started, 1, 'without getProvider the start call is still the check')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

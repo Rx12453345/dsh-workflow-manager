@@ -62,6 +62,19 @@ live until it has been synced and DSH restarted.
 - **A start-failure detail carries four REAL stack frames.** The stack header (`Error: message`) was
   counted as one of the four, so the report kept three frames and repeated the message; frames are
   now taken from lines matching `^\s+at ` and the message appears once.
+- **The changed-file cross-check reads each declared source directory, not only the project root.**
+  A project whose root is not a checkout but whose `verification.sources` contain one is now checked
+  there: each resolved source directory is read with the same collector, its paths are mapped to
+  project-relative spellings, and the union is deduped and capped. Declaring sources **adds** work
+  trees and never narrows the comparison: when the project root is itself a work tree it is still
+  read, so `package.json`, CI files and docs are not lost. Files and non-repositories are skipped
+  and named, the audit says which work trees and source directories were read, a source list that
+  resolves to no work tree keeps the honest NOT CHECKED reason naming the sources, and with no
+  sources declared the root-only behaviour is unchanged. `evaluator.provider` (default `spawn`) is
+  a real configuration key again and is probed through the service's `getProvider(name)` before a
+  reviewer starts, so a missing provider is refused by name instead of surfacing as an opaque start
+  failure. The status line for an unreadable mutation-harness table now names the reviewed
+  project's table, not "this installation".
 
 `package.json` stays **0.4.0**.
 

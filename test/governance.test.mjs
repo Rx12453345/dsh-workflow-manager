@@ -25,6 +25,7 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  realpathSync,
   rmdirSync,
   rmSync,
   openSync,
@@ -61,6 +62,7 @@ import { resolveConfig } from '../lib/config.js'
 import {
   GIT_STATUS_ARGS,
   collectGitChanges,
+  crossCheckChangedFiles,
   isFrameworkStatePath,
   normaliseGitPath,
   parsePorcelainZ,
@@ -916,6 +918,268 @@ test('collectGitChanges accepts a project whose path has a JUNCTION ancestor', t
     rmSync(holder, { recursive: true, force: true })
     rmSync(repo.dir, { recursive: true, force: true })
     rmSync(repo.run.scratch, { recursive: true, force: true })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// PER-SOURCE cross-check: a project whose ROOT is not a checkout
+// ---------------------------------------------------------------------------
+//
+// The bilibili layout: the project root is not a repository, but one declared source
+// directory (`dsh-bilibili-pro`) is. Checking only the root reported NOT CHECKED forever, so
+// the declaration was never compared with anything even though git could read the source.
+// These fixtures use the injected `run` seam because the DSH sandbox denies a piped git spawn;
+// the seam answers as a repository would, so the mapping/cap/failure rules can be asserted
+// without a real `git init` per case.
+
+/** Whether a path is at or below a base directory, comparing the canonical spellings. */
+function insideDir(path, base) {
+  const candidate = String(path).replace(/\\/g, '/').toLowerCase()
+  const root = String(base).replace(/\\/g, '/').toLowerCase()
+  return candidate === root || candidate.startsWith(`${root}/`)
+}
+
+/** A fixture whose root is NOT a repository, with one nested directory that IS one. */
+function makeSourcesFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-wf-sources-'))
+  mkdirSync(join(root, 'pkg-repo', 'lib'), { recursive: true })
+  mkdirSync(join(root, 'pkg-plain'), { recursive: true })
+  writeFileSync(join(root, 'README.md'), '# root\n', 'utf8')
+  return root
+}
+
+/**
+ * A fake git that treats `repoDir` as a work tree and nothing else.
+ *
+ * `status` receives the canonical cwd, so a source that is a SUBDIRECTORY of the repository
+ * returns the repository-relative porcelain record git itself would print there.
+ */
+function sourceRunner({ repoDir, status }) {
+  const canonicalRepo = realpathSync.native(repoDir)
+  return (_command, args, options = {}) => {
+    const cwd = options.cwd ?? ''
+    if (!insideDir(cwd, canonicalRepo)) {
+      throw new Error('fatal: not a git repository (or any of the parent directories): .git')
+    }
+    if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true\n'
+    if (args[0] === 'rev-parse') return `${canonicalRepo}\n`
+    if (args[0] === 'status') return status(cwd)
+    throw new Error(`unexpected git call: ${args.join(' ')}`)
+  }
+}
+
+test('crossCheckChangedFiles reads each declared source work tree and maps paths to the project', () => {
+  const root = makeSourcesFixture()
+  try {
+    const repo = join(root, 'pkg-repo')
+    const run = sourceRunner({
+      repoDir: repo,
+      status: cwd =>
+        // The source directory equals the repo root: the full porcelain list. The nested
+        // `pkg-repo/lib` source reports the same tracked file again, which must DEDUPE.
+        cwd.replace(/\\/g, '/').toLowerCase().endsWith('/pkg-repo/lib')
+          ? ' M lib/a.js\0'
+          : ' M lib/a.js\0?? lib/b.js\0',
+    })
+    const result = crossCheckChangedFiles(
+      root,
+      ['pkg-repo/lib/a.js', 'README.md'],
+      {
+        run,
+        sources: ['pkg-repo', 'pkg-repo/lib', 'pkg-plain', 'README.md', 'pkg-repo/'],
+      },
+    )
+    assert.equal(result.checked, true, result.reason)
+    assert.equal(result.repository, true)
+    assert.equal(result.available, true)
+    assert.equal(result.failed, false)
+    assert.equal(result.complete, true)
+    // TWO paths, not three: `pkg-repo` and `pkg-repo/lib` both report lib/a.js, and the union
+    // is deduplicated after every path is mapped to its PROJECT-relative spelling.
+    assert.deepEqual(result.actual, ['pkg-repo/lib/a.js', 'pkg-repo/lib/b.js'])
+    assert.deepEqual(result.untracked, ['pkg-repo/lib/b.js'])
+    assert.deepEqual(result.repoRoots, ['pkg-repo'])
+    // Files and directories that are not work trees are NAMED, not silently dropped; the
+    // duplicate spelling of a real source is a dedupe, not a skip.
+    const skipped = result.skippedSources.map(entry => entry.source)
+    assert.ok(skipped.includes('pkg-plain'), JSON.stringify(skipped))
+    assert.ok(skipped.includes('README.md'), JSON.stringify(skipped))
+    assert.equal(skipped.includes('pkg-repo/'), false, 'a duplicate source spelling is deduped, not reported as skipped')
+    assert.match(result.reason, /git work tree\(s\) read: pkg-repo/)
+    assert.match(result.reason, /source\(s\) not read as work trees/)
+    // The omitted tracked path was added to the evidence, and an untracked addition stays out
+    // of the durable fingerprint.
+    assert.deepEqual(result.missing, ['pkg-repo/lib/b.js'])
+    assert.ok(result.evidence.includes('pkg-repo/lib/b.js'))
+    assert.deepEqual(result.durable, ['pkg-repo/lib/a.js', 'README.md'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('declaring sources ADDS nested work trees; it never narrows a root checkout', () => {
+  // THE REGRESSION THE FIRST REVIEW FOUND. A project whose root IS a work tree and that also
+  // declares sources must still compare root-level paths (`package.json`, CI, docs): declaring
+  // sources may only ADD nested repositories, never replace the root read. Otherwise an omitted
+  // package.json would be called a complete comparison — the fail-open the cross-check exists
+  // to prevent.
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-wf-union-'))
+  try {
+    mkdirSync(join(dir, 'lib'), { recursive: true })
+    writeFileSync(join(dir, 'package.json'), '{}\n', 'utf8')
+    writeFileSync(join(dir, 'CHANGELOG.md'), '# x\n', 'utf8')
+    const lib = join(dir, 'lib')
+    const run = sourceRunner({
+      repoDir: dir,
+      status: cwd =>
+        insideDir(cwd, lib)
+          ? ' M lib/a.js\0'
+          : ' M package.json\0 M CHANGELOG.md\0 M lib/a.js\0',
+    })
+    const result = crossCheckChangedFiles(dir, ['lib/a.js', 'CHANGELOG.md', 'package.json'], {
+      run,
+      sources: ['lib', 'cordis.patch.yml'],
+    })
+    assert.equal(result.checked, true, result.reason)
+    assert.equal(result.complete, true)
+    // Root-level paths are reported even though they are outside the declared source directory.
+    assert.deepEqual(result.actual, ['CHANGELOG.md', 'lib/a.js', 'package.json'])
+    assert.deepEqual(result.missing, [])
+    assert.deepEqual(result.unused, [], 'a root path git reports must never be called "possibly an earlier commit"')
+    assert.deepEqual(result.repoRoots, ['.'])
+    assert.deepEqual(result.sourcesRead, ['lib'])
+    assert.match(result.reason, /git work tree\(s\) read: \./)
+    assert.match(result.reason, /declared source\(s\) also read: lib/)
+    // A declared FILE source is not a directory, but the project-root read covers it; the note
+    // must say that instead of implying the file went unverified.
+    assert.match(result.reason, /source entries not read as directories \(the project-root read covered them\)/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('crossCheckChangedFiles reports NOT CHECKED when no declared source is a repository', () => {
+  const root = makeSourcesFixture()
+  try {
+    const run = () => {
+      throw new Error('fatal: not a git repository (or any of the parent directories): .git')
+    }
+    const result = crossCheckChangedFiles(root, ['pkg-plain/x.js'], {
+      run,
+      sources: ['pkg-plain', 'README.md'],
+    })
+    assert.equal(result.checked, false)
+    assert.equal(result.repository, false)
+    assert.equal(result.available, false)
+    assert.equal(result.failed, false, 'not-a-repository is a documented NOT CHECKED, not a git failure')
+    assert.equal(result.complete, false)
+    assert.deepEqual(result.actual, [])
+    assert.deepEqual(result.evidence, ['pkg-plain/x.js'], 'an unchecked declaration stands')
+    assert.match(result.reason, /none of the declared verification\.sources resolves to a git work tree/)
+    assert.match(result.reason, /pkg-plain/, 'the reason names the declared sources')
+    assert.match(result.reason, /README\.md/)
+    assert.equal(result.repoRoots.length, 0)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the root-only cross-check is unchanged when no sources are declared', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-wf-rootsource-'))
+  try {
+    mkdirSync(join(dir, 'lib'), { recursive: true })
+    writeFileSync(join(dir, 'lib', 'a.js'), 'export const a = 1\n', 'utf8')
+    const run = sourceRunner({ repoDir: dir, status: () => ' M lib/a.js\0' })
+    const result = crossCheckChangedFiles(dir, ['lib/a.js'], { run })
+    assert.equal(result.checked, true, result.reason)
+    assert.deepEqual(result.actual, ['lib/a.js'])
+    // The root-only collector keeps its historical shape: no source-scope fields, no scope
+    // note appended to the reason.
+    assert.equal('repoRoots' in result, false)
+    assert.equal('skippedSources' in result, false)
+    assert.doesNotMatch(result.reason, /git work tree\(s\) read/)
+    // Same answer as the collector it has always been.
+    assert.deepEqual(collectGitChanges(dir, { run }).paths, ['lib/a.js'])
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('a per-source comparison keeps the cap and the failed semantics', () => {
+  const root = makeSourcesFixture()
+  try {
+    const repo = join(root, 'pkg-repo')
+    const statusRunner = sourceRunner({
+      repoDir: repo,
+      status: () => ' M lib/a.js\0 M lib/b.js\0 M lib/c.js\0',
+    })
+    // CAP: three paths under a one-path cap is INCOMPLETE, not a one-path clearance.
+    const capped = crossCheckChangedFiles(root, ['pkg-repo/lib/a.js'], {
+      run: statusRunner,
+      sources: ['pkg-repo'],
+      cap: 1,
+    })
+    assert.equal(capped.checked, true)
+    assert.equal(capped.truncated, true)
+    assert.equal(capped.complete, false)
+    assert.equal(capped.totalPaths, 3)
+    assert.deepEqual(capped.actual, ['pkg-repo/lib/a.js'])
+    // The per-source total is EXACT when one work tree was read; the message must not claim
+    // "more than 3" for a count the collector computed exactly.
+    assert.match(capped.reason, /report 3 changed path\(s\)/)
+    assert.doesNotMatch(capped.reason, /more than 3|at least 3/)
+
+    // FAILED: a throwing `git status` is not a truncated scan, and must not be reported as one.
+    const failedRunner = sourceRunner({
+      repoDir: repo,
+      status: () => {
+        const error = new Error('fatal: Unable to create index.lock: File exists.')
+        error.code = 'EBUSY'
+        throw error
+      },
+    })
+    const failed = crossCheckChangedFiles(root, ['pkg-repo/lib/a.js'], {
+      run: failedRunner,
+      sources: ['pkg-repo'],
+    })
+    assert.equal(failed.checked, false)
+    assert.equal(failed.failed, true)
+    assert.equal(failed.available, true)
+    assert.equal(failed.repository, true)
+    assert.equal(failed.complete, false)
+    assert.deepEqual(failed.actual, [])
+    assert.match(failed.reason, /git could not read at least one source work tree/)
+    assert.doesNotMatch(failed.reason, /-path cap/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('workflow_review passes verification.sources to the cross-check', async () => {
+  // THE WIRING, not just the collector: the project root here is NOT a repository, and the
+  // only work tree is the declared source. A review that still checked the root would report
+  // NOT CHECKED; this asserts the declared source is where the comparison actually ran.
+  const dir = makeProject({
+    yml: 'tier: standard\nverification:\n  policy: advisory\n  sources:\n    - pkg-repo\n',
+  })
+  try {
+    mkdirSync(join(dir, 'pkg-repo', 'lib'), { recursive: true })
+    const run = sourceRunner({
+      repoDir: join(dir, 'pkg-repo'),
+      status: () => ' M lib/a.js\0?? lib/b.js\0',
+    })
+    const { reviewDef, reviewExec } = reviewRig(dir, { gitRun: run })
+    const review = await reviewDef.execute(
+      { feature: 'a source-dir change', changed_files: ['pkg-repo/lib/a.js'] },
+      reviewExec,
+    )
+    assert.equal(review.status, 'reviewed', JSON.stringify(review).slice(0, 400))
+    assert.equal(review.changedFilesCrossCheck.checked, true, review.changedFilesCrossCheck.reason)
+    assert.equal(review.changedFilesCrossCheck.repository, true)
+    assert.deepEqual(review.changedFilesCrossCheck.missing, ['pkg-repo/lib/b.js'])
+    assert.match(review.changedFilesCrossCheck.reason, /pkg-repo/)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 

@@ -560,6 +560,26 @@ path into the evidence the reviewer sees. An honest model can still miss generat
 the reviewer-side check reduces that far more cheaply, and neither half is an enforced boundary. See
 [DESIGN.md §11.3](DESIGN.md#113-why-the-cross-check-is-evidence-not-a-security-boundary).
 
+### A cross-check that reads only the project root reports NOT CHECKED when the code lives in a nested repository
+The bilibili project's root is not a checkout; only its declared source directory
+(`dsh-bilibili-pro`) is. `crossCheckChangedFiles` ran `git status` once on the project root, which
+therefore answered "not a git work tree" on every call: the declared file list was never compared
+with anything, even though git could read every source the project declared. Root-only is the wrong
+question — the project's own `verification.sources` says where its code lives. Fix: resolve each
+source entry to a directory and run the SAME collector there, then map each reported path with the
+source directory's **project-relative prefix** (a repository whose top level is the project maps
+identically; a nested one contributes `sub/dir/<repo-relative path>`), dedupe and cap the union, and
+name the work trees and source directories read plus the entries skipped (a file, a glob or a
+missing path is skipped and named, never silently dropped). **A SOURCE LIST IS NOT A SCOPE
+REPLACEMENT**: a project root that IS a work tree is still read, and the per-source result is
+unioned on top, because declaring `sources` must only add nested repositories — replacing the root
+read would let an omitted `package.json` or CI file look like a complete comparison. When the
+declared sources resolve to no work tree the result stays NOT CHECKED and the reason names them; with
+no sources declared the root-only path is unchanged. **VERIFIED** — `test/governance.test.mjs`
+(per-source mapping, union/dedupe, root-plus-sources union, NOT CHECKED, cap, failure, and
+sources-absent cases; plus the `workflow_review` wiring test whose project root is not a
+repository).
+
 ### Editing a reviewed file in a later feature stales an earlier PASS
 A docs feature that edits `README.md`, `CONTRIBUTING.md` or `docs/TESTING.md` — files an earlier feature
 covered — invalidates that earlier feature's PASS, because the fingerprint hashes the reviewed **text**
