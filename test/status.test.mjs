@@ -3137,3 +3137,96 @@ test('the aside under a value is shown only when it says something', () => {
   )
   assert.deepEqual(projectRowText(null), { value: null, shadow: null, asked: null })
 })
+
+// ---------------------------------------------------------------------------
+// P3: the janitor's leftovers are visible in status, and a read is not a sweep
+// ---------------------------------------------------------------------------
+
+test('workflow_status reports the pending snapshot leftovers and their keep reasons', () => {
+  const dir = makeProject('tier: standard\n')
+  const scratch = mkdtempSync(join(tmpdir(), 'dsh-wf-status-pending-'))
+  const statePath = join(scratch, 'pending.json')
+  const roots = []
+  const pending = []
+  for (let index = 0; index < 4; index += 1) {
+    const rootDir = join(tmpdir(), `dsh-review-status-fixture-${process.pid}-${index}`)
+    mkdirSync(rootDir, { recursive: true })
+    writeFileSync(join(rootDir, 'snapshot.json'), '{}\n', 'utf8')
+    roots.push(rootDir)
+    pending.push({
+      rootDir,
+      projectDir: null,
+      registeredAt: new Date().toISOString(),
+      releasedAt: new Date().toISOString(),
+      reason: 'registered after a failed delete',
+      attempts: index + 1,
+      lastAttemptAt: new Date().toISOString(),
+      // A newline is flattened, because a durable reason must never forge a report line.
+      lastReason:
+        index === 0
+          ? 'the reviewer copy could not be removed (EPERM)\nand was kept'
+          : `kept for reason ${index}`,
+    })
+  }
+  writeFileSync(
+    statePath,
+    `${JSON.stringify({ plugin: 'dsh-workflow', kind: 'review-cleanup', pending }, null, 2)}\n`,
+    'utf8',
+  )
+
+  try {
+    const text = renderStatus(
+      buildStatus({
+        exec: execFor(dir),
+        config: resolveConfig({}),
+        services,
+        pendingCleanupStatePath: statePath,
+      }),
+    )
+    assert.match(text, /reviewer snapshot leftovers: 4 kept for a later cleanup/)
+    assert.match(text, /EPERM\) and was kept/, 'the recorded reason is rendered with newlines flattened')
+    assert.match(text, /attempt 1 at /, 'the attempt count and time are rendered')
+    const renderedEntries = text
+      .split('\n')
+      .filter(line => line.startsWith('  ') && line.includes('dsh-review-status-fixture-'))
+    assert.equal(renderedEntries.length, 3, 'the leftover list is bounded to a few entries')
+    assert.equal(renderedEntries.some(line => line.includes('reason 3')), false, 'the fourth is not printed')
+    for (const root of roots) {
+      assert.equal(existsSync(root), true, 'reading the status never deletes a leftover')
+    }
+  } finally {
+    for (const root of roots) {
+      try {
+        rmSync(root, { recursive: true, force: true })
+      } catch {
+        // best effort
+      }
+    }
+    rmSync(scratch, { recursive: true, force: true })
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('workflow_status reports a corrupt pending list instead of reading it as nothing to clean', () => {
+  const dir = makeProject('tier: standard\n')
+  const scratch = mkdtempSync(join(tmpdir(), 'dsh-wf-status-pending-corrupt-'))
+  const statePath = join(scratch, 'pending.json')
+  writeFileSync(statePath, '{ this is not json', 'utf8')
+  try {
+    const text = renderStatus(
+      buildStatus({
+        exec: execFor(dir),
+        config: resolveConfig({}),
+        services,
+        pendingCleanupStatePath: statePath,
+      }),
+    )
+    assert.match(text, /pending snapshot cleanup problem: .*not valid JSON/)
+    assert.doesNotMatch(text, /reviewer snapshot leftovers:/, 'a corrupt list is not reported as "0 pending"')
+    assert.equal(existsSync(statePath), true, 'the corrupt file is left for inspection')
+  } finally {
+    rmSync(statePath, { force: true })
+    rmSync(scratch, { recursive: true, force: true })
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

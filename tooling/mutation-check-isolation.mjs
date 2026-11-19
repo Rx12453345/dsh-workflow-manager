@@ -75,6 +75,49 @@ const MUTANTS = [
     replace: `      if (false) {`,
     expect: /digest|snapshot copy/i,
   },
+  {
+    id: 'I7',
+    what: 'a kept sweep does not increment the durable attempt count, so "kept once" and "kept forever" look the same',
+    file: 'lib/review-sandbox.js',
+    find: `    attempts: boundedAttempts((Number.isInteger(entry.attempts) ? entry.attempts : 0) + 1),`,
+    replace: `    attempts: 0,`,
+    expect: /attempt|counted/i,
+  },
+  {
+    id: 'I8',
+    what: 'a sweep that keeps everything writes nothing again, so the keep reason survives only in the mount log',
+    file: 'lib/review-sandbox.js',
+    find: `  if (remaining.length !== current.entries.length || recordedKeep) {`,
+    replace: `  if (remaining.length !== current.entries.length) {`,
+    expect: /reason/i,
+  },
+  {
+    id: 'I9',
+    what: 'a hand-edited keep reason keeps its newlines, so it can forge extra lines into the status report',
+    file: 'lib/review-sandbox.js',
+    find: `  const flat = value.replace(/[\\r\\n\\u2028\\u2029]+/g, ' ').trim()`,
+    replace: `  const flat = String(value).trim()`,
+    expect: /flatten/i,
+  },
+  {
+    id: 'I10',
+    what: 'the in-process retry loses its hard attempt ceiling, so a clock that never advances schedules forever',
+    file: 'lib/review-sandbox.js',
+    find: `      if (controller.attempts >= maxAttempts || now() - startedAt >= windowMs) {`,
+    replace: `      if (now() - startedAt >= windowMs) {`,
+    expect: /ceiling|frozen/i,
+  },
+  {
+    id: 'I11',
+    what: 'the read-only status view sweeps the pending list it is inspecting instead of only reading it',
+    file: 'lib/review-sandbox.js',
+    find: `  const current = readPendingSnapshots(statePath)
+  const entries = current.entries.slice(0, limit).map(entry => ({`,
+    replace: `  const current = readPendingSnapshots(statePath)
+  sweepPendingSnapshots({ statePath, tempRoot: tmpdir() })
+  const entries = current.entries.slice(0, limit).map(entry => ({`,
+    expect: /status view|never deletes|read-only/i,
+  },
 ]
 
 function run() {

@@ -15,6 +15,9 @@
  *   3. THE FAST LANE IS ANNOUNCED (G07)
  *      a move that skips VERIFY must say so in the payload and the rendered report, so the
  *      reader is never told the plain graph was followed.
+ *   4. THE CROSS-CHECK'S PER-SOURCE EVIDENCE (G08-G09)
+ *      the path key is case-insensitive only on win32, and a failed nested source is named as
+ *      failed rather than counted as read.
  *
  * WHY EVERY MUTANT RUNS IN A THROWAWAY COPY (P3-4)
  * The other `mutation-check-*.mjs` harnesses rewrite `lib/` in place, hold a lock and restore the
@@ -190,6 +193,22 @@ export const MUTANTS = [
     from: `      const fastLane = fastLaneFor(state.phase, to, effective.recipe)`,
     to: `      const fastLane = null`,
     must: ['the docs fast lane moves BUILD -> EVALUATE in the tool and names what it skipped'],
+  },
+  {
+    id: 'G08',
+    what: 'the path dedupe key lower-cases on every platform again, so a case variant collapses where it is a different file',
+    file: 'lib/git-changes.js',
+    from: `  return platform === 'win32' ? path.toLowerCase() : path`,
+    to: `  return path.toLowerCase()`,
+    must: ['the path dedupe key is case-insensitive only on win32, and reconciliation uses it'],
+  },
+  {
+    id: 'G09',
+    what: 'a nested source whose read failed is counted as read again, so the audit hides which source failed',
+    file: 'lib/git-changes.js',
+    from: `    if (collected.failed === true) {`,
+    to: `    if (false) {`,
+    must: ['a failed nested source is named, not listed as read, and the reason says which one'],
   },
 ]
 
@@ -486,7 +505,7 @@ export function runGovernanceProbe({
   }
 
   const unusableAnchors = rows.filter(row => row.verdict === 'NOT APPLIED').length
-  log('mutation check: HANDOFF governance, the waiver and the docs fast lane')
+  log('mutation check: HANDOFF governance, the waiver, the docs fast lane and the git-changes union')
   // "VERIFIED" IS A CLAIM ABOUT EVERY ANCHOR. An anchor that did not occur exactly once never ran
   // its mutant, so printing "anchors verified" next to a NOT APPLIED row would be a false headline
   // over a report whose exit code says the run failed.

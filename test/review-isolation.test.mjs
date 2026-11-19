@@ -50,6 +50,7 @@ import { createHash } from 'node:crypto'
 
 import { DEFAULT_DIMENSIONS, renderIsolation, runReview } from '../lib/review.js'
 import {
+  CLEANUP_ATTEMPT_CAP,
   SNAPSHOT_CANARY_NAME,
   SNAPSHOT_CLEANUP_RELEASE_GRACE_MS,
   SNAPSHOT_CLEANUP_RETRY,
@@ -60,6 +61,8 @@ import {
   defaultCleanupStatePath,
   discardReviewSnapshot,
   ensureCleanupRetry,
+  formatMegabytes,
+  pendingSnapshotLeftovers,
   readPendingSnapshots,
   registerPendingSnapshotCleanup,
   removeReviewSnapshot,
@@ -1591,4 +1594,250 @@ test('the durable list path defaults under the OS temp directory and is injectab
   assert.equal(dirname(defaultCleanupStatePath()), tmpdir())
   const injected = join(tmpdir(), 'a-test-owned-cleanup-state.json')
   assert.equal(readPendingSnapshots(injected).entries.length, 0, 'a missing list reads as empty, not as an error')
+})
+
+// ---------------------------------------------------------------------------
+// P3 HARDENING: a keep must be diagnosable, the cap display must be exact
+// ---------------------------------------------------------------------------
+
+test('a guard-kept sweep records its reason durably, and a later read still shows it', t => {
+  // THE ANOMALY THIS PINS. A pending snapshot was kept while the root was deletable by hand, and
+  // the keep reason only reached the mount log — which the next session never sees. A sweep that
+  // keeps everything now REWRITES the kept entry, so the second occurrence can be diagnosed from
+  // the durable list alone.
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-reason-')
+  const otherTemp = makeHolder(t, 'wf-iso-janitor-reason-other-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-reason-state-'), 'pending.json')
+  const elsewhere = makeSweepableSnapshot(t, otherTemp)
+  registerPendingSnapshotCleanup({ rootDir: elsewhere }, { statePath })
+
+  const first = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
+  assert.deepEqual(first.removed, [], 'the out-of-scope root is kept')
+  assert.equal(existsSync(elsewhere), true)
+  assert.equal(readPendingSnapshots(statePath).entries.length, 1, 'a keep does not drop the entry')
+
+  const afterFirst = readPendingSnapshots(statePath).entries[0]
+  assert.equal(afterFirst.attempts, 1, 'the first kept sweep is counted')
+  assert.equal(typeof afterFirst.lastAttemptAt, 'string', 'the attempt time is recorded')
+  assert.match(afterFirst.lastReason, /not under the OS temp directory/)
+  assert.doesNotMatch(afterFirst.lastReason, /[\r\n]/, 'the recorded reason is one line')
+
+  const second = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() + 1000 })
+  assert.equal(second.kept.length, 1)
+  const afterSecond = readPendingSnapshots(statePath).entries[0]
+  assert.equal(afterSecond.attempts, 2, 'every kept sweep increments the durable count')
+  assert.match(afterSecond.lastReason, /not under the OS temp directory/)
+})
+
+test('a hand-edited keep record is flattened, bounded and not trusted raw', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-flatten-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-flatten-state-'), 'pending.json')
+  const root = makeSweepableSnapshot(t, tempRoot)
+  writeLegacyPendingList(statePath, [
+    {
+      rootDir: root,
+      projectDir: null,
+      registeredAt: null,
+      reason: null,
+      attempts: -4,
+      lastAttemptAt: 'not-a-date',
+      lastReason: 'first line\r\nsecond line\u2028third line',
+    },
+  ])
+  const entry = readPendingSnapshots(statePath).entries[0]
+  assert.equal(entry.attempts, 0, 'a negative count is not trusted')
+  assert.equal(entry.lastAttemptAt, null, 'an unparseable time is not trusted')
+  assert.equal(entry.lastReason, 'first line second line third line', 'newlines are flattened')
+  assert.ok(entry.lastReason.length <= 300, 'the recorded reason is bounded')
+})
+
+test('the recorded attempt count is capped so the durable list cannot grow without bound', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-cap-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-cap-state-'), 'pending.json')
+  const held = makeSweepableSnapshot(t, tempRoot, { pid: process.pid })
+  writeLegacyPendingList(statePath, [
+    {
+      rootDir: held,
+      projectDir: null,
+      registeredAt: null,
+      reason: null,
+      attempts: CLEANUP_ATTEMPT_CAP,
+      lastAttemptAt: null,
+      lastReason: null,
+    },
+  ])
+  const swept = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
+  assert.equal(swept.kept.length, 1)
+  assert.equal(
+    readPendingSnapshots(statePath).entries[0].attempts,
+    CLEANUP_ATTEMPT_CAP,
+    'the counter saturates instead of growing forever',
+  )
+})
+
+test('the status view reads the pending list without deleting anything', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-view-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-view-state-'), 'pending.json')
+  const root = makeSweepableSnapshot(t, tempRoot)
+  registerPendingSnapshotCleanup({ rootDir: root }, { statePath })
+  sweepPendingSnapshots({
+    statePath,
+    tempRoot: makeHolder(t, 'wf-iso-janitor-view-other-'),
+    now: afterReleaseGrace(),
+  })
+
+  const view = pendingSnapshotLeftovers({ statePath })
+  assert.equal(view.count, 1)
+  assert.equal(view.entries[0].rootDir, root)
+  assert.match(view.entries[0].lastReason, /not under the OS temp directory/)
+  assert.equal(existsSync(root), true, 'the read-only view never deletes the snapshot')
+  assert.equal(existsSync(statePath), true, 'the read-only view never rewrites the list')
+  assert.equal(
+    readPendingSnapshots(statePath).entries[0].attempts,
+    1,
+    'the read-only view does not record an attempt — it is not a sweep',
+  )
+})
+
+test('the status view bounds the entries it reports and says it truncated', t => {
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-bounded-state-'), 'pending.json')
+  const pending = []
+  for (let index = 0; index < 5; index += 1) {
+    pending.push({
+      rootDir: join(tmpdir(), `dsh-review-bounded-fixture-${process.pid}-${index}`),
+      projectDir: null,
+      registeredAt: null,
+      reason: null,
+      attempts: index,
+      lastAttemptAt: null,
+      lastReason: `kept ${index}`,
+    })
+  }
+  writeLegacyPendingList(statePath, pending)
+  const view = pendingSnapshotLeftovers({ statePath, limit: 2 })
+  assert.equal(view.count, 5)
+  assert.equal(view.entries.length, 2)
+  assert.equal(view.truncated, true)
+})
+
+test('a pending root removed by hand leaves the list on the next sweep', t => {
+  const tempRoot = makeHolder(t, 'wf-iso-janitor-hand-')
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-hand-state-'), 'pending.json')
+  const root = makeSweepableSnapshot(t, tempRoot)
+  registerPendingSnapshotCleanup({ rootDir: root }, { statePath })
+  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+
+  const swept = sweepPendingSnapshots({ statePath, tempRoot, now: afterReleaseGrace() })
+  assert.deepEqual(swept.gone, [root], 'a missing root is reported as gone, not kept forever')
+  assert.equal(readPendingSnapshots(statePath).entries.length, 0, 'the entry leaves the list')
+})
+
+test('a corrupt pending list is reported by the sweep and by the status view', t => {
+  const statePath = join(makeHolder(t, 'wf-iso-janitor-corrupt-'), 'pending.json')
+  writeFileSync(statePath, '{ not json')
+  const swept = sweepPendingSnapshots({
+    statePath,
+    tempRoot: makeHolder(t, 'wf-iso-janitor-corrupt-temp-'),
+    now: Date.now(),
+  })
+  assert.equal(swept.checked, 0)
+  assert.match(swept.problems.join(' '), /not valid JSON/)
+
+  const view = pendingSnapshotLeftovers({ statePath })
+  assert.equal(view.count, 0)
+  assert.match(view.problems.join(' '), /not valid JSON/)
+  assert.equal(existsSync(statePath), true, 'the corrupt file is not rewritten or deleted')
+})
+
+test('a sweep with no pending list never grows a state file', t => {
+  const dir = makeHolder(t, 'wf-iso-janitor-nostate-')
+  const statePath = join(dir, 'pending.json')
+  const swept = sweepPendingSnapshots({ statePath, tempRoot: dir, now: Date.now() })
+  assert.deepEqual(swept.kept, [])
+  assert.equal(existsSync(statePath), false, 'no failed delete means no durable state file')
+})
+
+test('the in-process retry has a hard attempt ceiling even when the clock never advances', t => {
+  t.after(() => stopCleanupRetry())
+  const tempRoot = makeHolder(t, 'wf-iso-retry-ceiling-temp-')
+  const statePath = join(makeHolder(t, 'wf-iso-retry-ceiling-state-'), 'pending.json')
+  const held = makeSweepableSnapshot(t, tempRoot, { pid: process.pid })
+  writeLegacyPendingList(statePath, [{ rootDir: held, projectDir: null, registeredAt: null, reason: null }])
+
+  const timers = []
+  const controller = ensureCleanupRetry({
+    statePath,
+    tempRoot,
+    intervalMs: 10,
+    windowMs: 40,
+    setTimeout: fn => {
+      const handle = { fn, unref() {} }
+      timers.push(handle)
+      return handle
+    },
+    clearTimeout: () => {},
+    // A FROZEN CLOCK: the wall-clock window alone would never stop this retry.
+    now: () => 0,
+  })
+  assert.equal(controller.started, true)
+  assert.equal(controller.maxAttempts, 5)
+
+  let fired = 0
+  while (!controller.stopped && fired < 20) {
+    assert.ok(timers[fired], 'a timer exists while the retry runs')
+    timers[fired].fn()
+    fired += 1
+  }
+  assert.equal(controller.stopped, true, 'the hard ceiling stops a frozen clock')
+  assert.equal(controller.attempts, 5, 'attempts are bounded by the ceiling')
+  assert.equal(timers.length, 5, 'no timer is scheduled after the ceiling')
+})
+
+test('formatMegabytes keeps three significant digits and trims trailing zeros', () => {
+  const mb = value => value * 1024 * 1024
+  assert.equal(formatMegabytes(mb(0.5)), '0.5')
+  assert.equal(formatMegabytes(mb(0.25)), '0.25')
+  assert.equal(formatMegabytes(mb(0.04)), '0.04')
+  assert.equal(formatMegabytes(mb(512)), '512')
+  // WHOLE CAPS ARE EXACT AT ANY MAGNITUDE: three significant digits alone would print a
+  // configured 1024 MB as "1020" — the same lie as 0.25 -> "0.3".
+  assert.equal(formatMegabytes(mb(1024)), '1024')
+  assert.equal(formatMegabytes(mb(2048)), '2048')
+  assert.equal(formatMegabytes(0), '0')
+  assert.equal(formatMegabytes(mb(1.234)), '1.23')
+  assert.equal(formatMegabytes(Number.NaN), '?')
+})
+
+test('a fractional cap keeps its exact byte limit while caps.maxMb is the configured value', t => {
+  const project = makeProject(t)
+  // Larger than 0.04 MB (41,943 bytes) and smaller than 0.25 MB (262,144 bytes).
+  writeFileSync(join(project, 'src', 'fifty.bin'), Buffer.alloc(50 * 1024, 7))
+  const roots = []
+  t.after(() => {
+    for (const root of roots) {
+      try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
+      } catch {
+        // best effort
+      }
+    }
+  })
+
+  const tiny = createReviewSnapshot(project, { maxBytes: 0.04 * 1024 * 1024 })
+  assert.equal(tiny.ok, false)
+  assert.match(tiny.reason, /over the 0\.04 MB cap/, 'the refusal names the 0.04 MB cap the user wrote')
+
+  const half = createReviewSnapshot(project, { maxBytes: 0.5 * 1024 * 1024 })
+  assert.equal(half.ok, true, half.reason)
+  if (half.ok) {
+    roots.push(half.rootDir)
+    assert.equal(half.caps.maxMb, 0.5, 'the evidence records the configured value, not a rounded one')
+  }
+
+  const quarter = createReviewSnapshot(project, { maxBytes: 0.25 * 1024 * 1024 })
+  assert.equal(quarter.ok, true, quarter.reason)
+  if (quarter.ok) {
+    roots.push(quarter.rootDir)
+    assert.equal(quarter.caps.maxMb, 0.25)
+  }
 })

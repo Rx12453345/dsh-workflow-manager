@@ -51,10 +51,11 @@ live until it has been synced and DSH restarted.
 - **`review.snapshot.exclude` refuses `.git`.** An entry whose first segment is `.git` is dropped
   with a problem explaining that `.git` is both the fence's detection basis and its restore source,
   so the "`.git` is never excluded" invariant now holds rather than being merely documented.
-- **A fractional `maxMb` is reported as configured.** `0.5` reads "0.5 MB" in an over-cap refusal
-  and is recorded as `0.5` in the isolation evidence while the byte limit stays exact. The shipped
-  core row in `cordis.patch.yml` now carries the `review.snapshot` defaults with the other runtime
-  sections.
+- **A fractional `maxMb` is reported as configured.** `0.5` reads "0.5 MB" in an over-cap refusal,
+  `0.25` reads "0.25 MB" and `0.04` reads "0.04 MB" (three significant digits with trailing zeros
+  trimmed, replacing one-decimal rounding that printed "0.3" and "0"), and the value is recorded
+  exactly in the isolation evidence while the byte limit stays exact. The shipped core row in
+  `cordis.patch.yml` now carries the `review.snapshot` defaults with the other runtime sections.
 - **The five sandbox-skipped mutation-lock cases now run in the DSH sandbox.** They capture their
   children through file descriptors (`tooling/child-output.mjs` for `spawnSync`, file-backed stdio
   for async spawn) instead of pipes, so the sandbox no longer denies them. Assertions and meaning
@@ -75,6 +76,25 @@ live until it has been synced and DSH restarted.
   reviewer starts, so a missing provider is refused by name instead of surfacing as an opaque start
   failure. The status line for an unreadable mutation-harness table now names the reviewed
   project's table, not "this installation".
+- **A pending snapshot's keep reason is recorded, not only logged.** A snapshot kept because a live
+  handle won the delete race used to leave its explanation in the mount log, which the next session
+  never sees. Pending entries now carry `attempts`, `lastAttemptAt` and a bounded one-line
+  `lastReason`, and a sweep that keeps an entry rewrites the list (it used to write only when an
+  entry left), so the next occurrence records why it was kept. `workflow_status` reports the pending
+  count and up to three entries with the root and keep reason, read-only — it never sweeps — and a
+  corrupt list is reported rather than read as "nothing to clean". The attempt counter saturates,
+  the in-process retry gained a hard attempt ceiling derived from its window, and "a machine that
+  never had a failed delete grows no state file" still holds.
+- **A failed nested source is no longer called "read", and case-variant paths survive.** A source
+  whose `git status` threw was listed in `sourcesRead` while the combined reason named only the
+  root list; it is now named in `sourcesFailed` and in the reason. The per-source union also dedupes
+  exactly on a case-sensitive filesystem instead of collapsing `lib/A.js` and `lib/a.js` into one
+  evidence row (case-insensitive dedupe is kept only on Windows, where they are the same file), and
+  `reconcileChangedFiles` uses the same platform rule — otherwise a declared `src/App.js` would
+  cover a real `src/app.js` on Linux and the changed file would never reach the reviewer. A new
+  test exercises the bilibili layout with **real git** — a temp project root that is not a
+  work tree, a `git init`ed `src`, a file-backed runner because the sandbox denies a piped child —
+  and asserts the mapped `src/x.js`, a complete checked comparison and `mismatch: false`.
 
 `package.json` stays **0.4.0**.
 

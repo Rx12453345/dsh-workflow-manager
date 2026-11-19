@@ -205,7 +205,9 @@ criteria keys such as `functional`, `no_regression`, `ui` and checks such as `e2
 ### 5.5 Evaluation and the gate
 
 The `evaluator` block: `independent: true` (must spawn a fresh child; same-session self-evaluation is
-forbidden, `provider: spawn`), `bar: 8` on a 0–10 scale, seven dimensions (`correctness`, `build`,
+forbidden, `provider` defaults to `spawn` and is configurable — the configured provider is probed
+through the service's `getProvider(name)` before a reviewer starts, and a missing one is refused by
+name), `bar: 8` on a 0–10 scale, seven dimensions (`correctness`, `build`,
 `tests`, `regressions`, `arch_fit`, `legibility`, `scope`), `must_pass: [correctness, build,
 regressions]` as a veto, `max_rounds` after which the decision escalates to a human, and a report format
 of `score`, `per_dimension`, `timestamped_issues`, `concrete_fix`.
@@ -673,7 +675,9 @@ supplied here; where an item was not read first-hand, that is stated.
 2. **Anthropic, *Harness design for long-running application development*, 2026-03-24** — read
    first-hand.
    - The planner/generator/evaluator triad. An agent grading its own output *"has an inherent bias"* →
-     `evaluator.independent: true` by default, and the evaluator must use `provider: spawn`.
+     `evaluator.independent: true` by default, and the evaluator spawns a fresh child: `provider`
+     defaults to `spawn` and is configurable, with the configured provider probed before the review
+     starts.
    - The generator negotiates the *"definition of delivery"* with the evaluator **before** writing code →
      `acceptance.negotiate_before_build: true`.
    - The same cost measurements → the §7.1 baseline and the tier boundaries.

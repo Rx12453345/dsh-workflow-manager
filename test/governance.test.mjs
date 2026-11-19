@@ -63,6 +63,7 @@ import {
   GIT_STATUS_ARGS,
   collectGitChanges,
   crossCheckChangedFiles,
+  dedupeKey,
   isFrameworkStatePath,
   normaliseGitPath,
   parsePorcelainZ,
@@ -789,6 +790,28 @@ test('reconcileChangedFiles treats the union as evidence and reports the omissio
   assert.deepEqual(unchecked.durable, ['lib/a.js'])
 })
 
+test('the path dedupe key is case-insensitive only on win32, and reconciliation uses it', () => {
+  // THE P3C COMPLETION. The union was made exact on a case-sensitive filesystem, but
+  // `reconcileChangedFiles` still keyed everything lower-case — so a declared `src/App.js`
+  // covered a real `src/app.js` on Linux: missing was empty, mismatch false, and the changed
+  // file never reached the evidence. The same platform rule now governs both.
+  assert.equal(dedupeKey('lib/A.js', 'win32'), dedupeKey('lib/a.js', 'win32'))
+  assert.notEqual(dedupeKey('lib/A.js', 'linux'), dedupeKey('lib/a.js', 'linux'))
+  assert.equal(dedupeKey('lib/A.js', 'linux'), 'lib/A.js')
+
+  const git = { available: true, repository: true, paths: ['src/app.js'], complete: true }
+  const result = reconcileChangedFiles(['src/App.js'], git)
+  if (process.platform === 'win32') {
+    assert.deepEqual(result.missing, [], 'on Windows the spellings are the same file')
+    assert.equal(result.mismatch, false)
+  } else {
+    assert.deepEqual(result.missing, ['src/app.js'], 'the real changed path is not hidden by a case typo')
+    assert.equal(result.mismatch, true)
+    assert.ok(result.evidence.includes('src/app.js'))
+    assert.deepEqual(result.durable, ['src/App.js', 'src/app.js'])
+  }
+})
+
 test('collectGitChanges reports a documented note when git is missing or there is no repository', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-wf-gitnote-'))
   try {
@@ -1152,6 +1175,127 @@ test('a per-source comparison keeps the cap and the failed semantics', () => {
     assert.doesNotMatch(failed.reason, /-path cap/)
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a failed nested source is named, not listed as read, and the reason says which one', () => {
+  // THE P2 MINOR. A nested source whose `git status` threw was still pushed into `sourcesRead`,
+  // and the combined reason named only the root list ("."). The audit then claimed a source was
+  // read that was not, and the one fact needed to fix it — which source failed — was missing.
+  const root = makeSourcesFixture()
+  try {
+    const repo = join(root, 'pkg-repo')
+    const canonicalRoot = realpathSync.native(root)
+    const canonicalRepo = realpathSync.native(repo)
+    const run = (_command, args, options = {}) => {
+      const cwd = options.cwd ?? ''
+      if (!insideDir(cwd, canonicalRoot)) {
+        throw new Error('fatal: not a git repository (or any of the parent directories): .git')
+      }
+      if (args[0] === 'rev-parse' && args[1] === '--is-inside-work-tree') return 'true\n'
+      if (args[0] === 'rev-parse') {
+        // The root and the nested repo are BOTH work trees, so the combined union path runs.
+        return `${insideDir(cwd, canonicalRepo) ? canonicalRepo : canonicalRoot}\n`
+      }
+      if (args[0] === 'status') {
+        if (insideDir(cwd, canonicalRepo)) {
+          throw Object.assign(new Error('fatal: Unable to create index.lock: File exists.'), { code: 'EBUSY' })
+        }
+        return ' M README.md\0'
+      }
+      throw new Error(`unexpected git call: ${args.join(' ')}`)
+    }
+    const result = crossCheckChangedFiles(root, ['README.md'], { run, sources: ['pkg-repo'] })
+    assert.equal(result.checked, false)
+    assert.equal(result.failed, true)
+    assert.deepEqual(result.sourcesRead, [], 'a source whose read failed is not "read"')
+    assert.deepEqual(result.sourcesFailed.map(entry => entry.source), ['pkg-repo'])
+    assert.match(result.sourcesFailed[0].reason, /index\.lock/)
+    assert.match(result.reason, /pkg-repo/, 'the combined reason names the failing source')
+    assert.match(result.reason, /index\.lock/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('the per-source union preserves case-variant paths where the filesystem does', () => {
+  // THE P2 MINOR. The union keyed every path case-insensitively, so on a case-sensitive
+  // filesystem two genuinely different files collapsed into one evidence row. The dedupe is now
+  // exact there and case-insensitive only on Windows (where they are the same file).
+  const root = makeSourcesFixture()
+  try {
+    const repo = join(root, 'pkg-repo')
+    const result = crossCheckChangedFiles(root, [], {
+      run: sourceRunner({ repoDir: repo, status: () => ' M lib/A.js\0 M lib/a.js\0' }),
+      sources: ['pkg-repo'],
+    })
+    assert.equal(result.checked, true, result.reason)
+    if (process.platform === 'win32') {
+      assert.deepEqual(result.actual, ['pkg-repo/lib/A.js'], 'one file on Windows')
+    } else {
+      assert.deepEqual(result.actual, ['pkg-repo/lib/A.js', 'pkg-repo/lib/a.js'], 'two files, both kept')
+    }
+    // Exact duplicates still collapse on every platform.
+    const exact = crossCheckChangedFiles(root, [], {
+      run: sourceRunner({ repoDir: repo, status: () => ' M lib/a.js\0 M lib/a.js\0' }),
+      sources: ['pkg-repo'],
+    })
+    assert.deepEqual(exact.actual, ['pkg-repo/lib/a.js'])
+
+    // A DECLARED CASE VARIANT IS NOT COVERAGE where the filesystem treats them as two files.
+    const declaredVariant = crossCheckChangedFiles(root, ['pkg-repo/lib/A.js'], {
+      run: sourceRunner({ repoDir: repo, status: () => ' M lib/a.js\0' }),
+      sources: ['pkg-repo'],
+    })
+    assert.equal(declaredVariant.checked, true, declaredVariant.reason)
+    if (process.platform === 'win32') {
+      assert.deepEqual(declaredVariant.missing, [], 'on Windows the two spellings are one file')
+      assert.equal(declaredVariant.mismatch, false)
+    } else {
+      assert.deepEqual(declaredVariant.missing, ['pkg-repo/lib/a.js'])
+      assert.equal(declaredVariant.mismatch, true)
+      assert.ok(declaredVariant.evidence.includes('pkg-repo/lib/a.js'))
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a real nested repository under a non-repository root is mapped back to the project', t => {
+  // THE EXACT SCENARIO, WITH REAL GIT. The per-source tests above inject a fake runner; this one
+  // proves the file-backed runner (`fileGitRunner` — the sandbox denies a piped child), real
+  // `git status --porcelain -z`, and the project-prefix mapping agree on the bilibili layout:
+  // the project root is NOT a repository and the only work tree is a declared source.
+  const run = gitAvailable(t)
+  if (run === null) return
+  const root = mkdtempSync(join(tmpdir(), 'dsh-wf-real-nested-'))
+  try {
+    const src = join(root, 'src')
+    mkdirSync(src, { recursive: true })
+    // THE ROOT MUST NOT BE A WORK TREE. Asserted before and after, so a temp directory that
+    // happened to sit inside some repository could not make this test pass for the wrong reason.
+    assert.throws(() => run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: root }))
+    run('git', ['init'], { cwd: src })
+    writeFileSync(join(src, 'x.js'), 'export const x = 1\n', 'utf8')
+    run('git', ['add', 'x.js'], { cwd: src })
+    // The identity is supplied on the command line so the test does not depend on git config.
+    run(
+      'git',
+      ['-c', 'user.email=p3@example.invalid', '-c', 'user.name=P3 Test', 'commit', '-m', 'base'],
+      { cwd: src },
+    )
+    writeFileSync(join(src, 'x.js'), 'export const x = 2\n', 'utf8')
+
+    const result = crossCheckChangedFiles(root, ['src/x.js'], { sources: ['src'], run })
+    assert.equal(result.checked, true, result.reason)
+    assert.equal(result.complete, true, result.reason)
+    assert.equal(result.mismatch, false, result.reason)
+    assert.deepEqual(result.actual, ['src/x.js'])
+    assert.deepEqual(result.sourcesRead, ['src'])
+    // The project root is still NOT a repository: the path came from the nested source.
+    assert.throws(() => run('git', ['rev-parse', '--is-inside-work-tree'], { cwd: root }))
+  } finally {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 })
   }
 })
 

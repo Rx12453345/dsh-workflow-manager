@@ -345,6 +345,23 @@ marker kept, out-of-scope root kept, non-our-marker kept, contamination never qu
 reported, bounded retry); the seven covering mutation harnesses also ran for this change, each with
 every mutant caught and sources restored byte-for-byte.
 
+### A keep reason that only reaches the mount log is a lost diagnosis
+A pending reviewer snapshot was kept at startup while its root was deletable by hand, and the only
+record of **why** was the mount log — which the next session never sees. The durable entry carried the
+registration reason (the original EPERM), but every later sweep that kept the root wrote nothing,
+because the list was rewritten only when an entry **left** it; the state file was therefore a list of
+paths with no evidence behind them. Fix: a pending entry now carries `attempts`, `lastAttemptAt` and a
+bounded one-line `lastReason` (newlines flattened), and a sweep that keeps anything rewrites the list,
+so the second occurrence records its own explanation. `workflow_status` reports the pending count and
+up to three entries with the root and keep reason, read-only: asking what is left can never delete the
+root a human is inspecting, and a corrupt list is reported rather than read as "0 pending". The
+attempt counter saturates at 1000 and the in-process retry has a hard attempt ceiling derived from its
+window — the wall-clock window alone depends on `now()` advancing, and a frozen clock would otherwise
+schedule forever. **A machine that never had a failed delete still grows no state file** (no entry, no
+write). **VERIFIED** by the isolation-suite cases: a guard-kept sweep's reason is readable on a second
+read, a hand-removed root drops the entry, a released entry is still swept, a corrupt list is
+reported, the status view deletes nothing, and the frozen-clock retry stops at its ceiling.
+
 ### A name list is not a classifier
 `SHELL_TOOLS` enumerated the shell tools the plugin knew (`bash`, `pwsh`, `exec`, …). The host then moved
 its shell to `ops_bash`, supplied by an ops plugin, and a plain `ops_bash{command: "del /f /s /q …"}`
@@ -575,10 +592,26 @@ REPLACEMENT**: a project root that IS a work tree is still read, and the per-sou
 unioned on top, because declaring `sources` must only add nested repositories — replacing the root
 read would let an omitted `package.json` or CI file look like a complete comparison. When the
 declared sources resolve to no work tree the result stays NOT CHECKED and the reason names them; with
-no sources declared the root-only path is unchanged. **VERIFIED** — `test/governance.test.mjs`
-(per-source mapping, union/dedupe, root-plus-sources union, NOT CHECKED, cap, failure, and
-sources-absent cases; plus the `workflow_review` wiring test whose project root is not a
-repository).
+no sources declared the root-only path is unchanged. Two audit defects were found in review and fixed:
+a source whose read **failed** was still listed in `sourcesRead` while the combined reason named only
+the root list ("."), so failure is now a separate `sourcesFailed` field and the reason names the
+failing source; and the union deduped case-insensitively everywhere, which on a case-sensitive
+filesystem collapses two genuinely different files (`lib/A.js` vs `lib/a.js`) into one evidence row —
+the dedupe is now exact there and case-insensitive only on win32, where they are the same file. The
+SAME platform rule now governs `reconcileChangedFiles`, which still keyed every path lower-case: on a
+case-sensitive filesystem a declared `src/App.js` covered a real `src/app.js`, so `missing` was empty,
+`mismatch` false and the changed file never reached the reviewer's evidence. **VERIFIED** —
+`test/governance.test.mjs` (per-source mapping, union/dedupe,
+root-plus-sources union, NOT CHECKED, cap, failure, failed-source naming, case-variant paths, and
+sources-absent cases; plus the `workflow_review` wiring test whose project root is not a repository).
+One case uses **real git** — the earlier ones inject the `run` seam, which proves the mapping and
+failure rules but not the real porcelain output or the plumbing. It creates the temp project OUTSIDE
+any work tree (asserting `git -C <tmp> rev-parse` fails, so the root really is not a repository),
+`git init`s `<tmp>/src`, commits, modifies, and requires `actual: ['src/x.js']`, `checked`/`complete`
+and `mismatch: false`. Its runner is **file-backed** (`fileGitRunner` in the test, the
+`tooling/child-output.mjs` pattern): stdout goes to a temp FILE descriptor and is read back from disk,
+because this sandbox denies a piped child (EPERM) — a fake git would have hidden exactly the
+transport the real case proves. It skips only when git itself is unavailable.
 
 ### Editing a reviewed file in a later feature stales an earlier PASS
 A docs feature that edits `README.md`, `CONTRIBUTING.md` or `docs/TESTING.md` — files an earlier feature
